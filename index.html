@@ -90,8 +90,8 @@
         <span class="msg" id="msg"></span>
       </div>
       <div class="row">
-        <button id="brkToilet" class="ghost" disabled>화장실</button>
-        <button id="brkRest" class="ghost" disabled>식사·휴식</button>
+        <button id="brkToilet" class="ghost" disabled>화장실 (10분)</button>
+        <button id="brkRest" class="ghost" disabled>식사·휴식 (40분)</button>
         <button id="brkEnd" hidden>공부 재개</button>
       </div>
     </section>
@@ -287,7 +287,8 @@ function stopLink() {
 }
 
 // --- 휴식 (화장실·식사) ---
-let onBreak = false, breakReason = "", breakLeft = false, goneSince = 0;
+let onBreak = false, breakReason = "", breakLeft = false, goneSince = 0, breakStart = 0;
+const BREAK_LIMIT_MIN = { "화장실": 10, "식사·휴식": 40 }; // 휴식 종류별 제한 시간(분)
 function breakButtons() {
   const running = !!timer;
   $("brkToilet").hidden = $("brkRest").hidden = onBreak;
@@ -296,7 +297,7 @@ function breakButtons() {
 }
 function startBreak(reason) {
   if (!timer) return;
-  onBreak = true; breakReason = reason; breakLeft = false; goneSince = 0;
+  onBreak = true; breakReason = reason; breakLeft = false; goneSince = 0; breakStart = Date.now();
   breakButtons(); setState("break"); sendStatus();
 }
 function endBreak() {
@@ -365,7 +366,17 @@ function tick() {
     if (!hasFace) { if (!goneSince) goneSince = now; if (now - goneSince > 5000) breakLeft = true; }
     else { goneSince = 0; if (breakLeft) endBreak(); }
   }
-  if (onBreak) { lastFace = now; closedSince = 0; setState("break"); renderTotals(); return; }
+  if (onBreak) {
+    const left = (BREAK_LIMIT_MIN[breakReason] || 10) * 60000 - (now - breakStart);
+    if (left <= 0) { // 제한 시간을 넘기면 휴식을 끝내고 관리자에게 알림
+      addLog(`휴식 시간 초과 (${breakReason})`); notify(`휴식 시간 초과 (${breakReason})`, true);
+      endBreak();
+    } else {
+      lastFace = now; closedSince = 0; setState("break");
+      badge.textContent = `휴식 중 · 남은 ${fmt(left)}`;
+      renderTotals(); return;
+    }
+  }
 
   let next = "study";
   if (now - lastFace >= cfg.away * 1000) next = "away";
