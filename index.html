@@ -111,12 +111,13 @@
         <h2>관리자 알림</h2>
         <label>학생 이름
           <input type="text" id="who" placeholder="예: 홍길동" maxlength="20" autocomplete="off"></label>
-        <label>알림 채널 이름 (관리자가 ntfy 앱에서 구독한 이름)
+        <label>관리 코드 (관리자 화면 코드 · ntfy 앱 구독 이름과 동일)
           <input type="text" id="topic" placeholder="영문·숫자·-·_ 만 가능" maxlength="64" autocomplete="off" autocapitalize="off"></label>
         <div class="row">
           <button id="testNotify" class="ghost">테스트 알림 보내기</button>
           <span class="msg" id="nMsg"></span>
         </div>
+        <p class="msg" id="lMsg" style="margin:10px 0 0"></p>
       </section>
 
       <section class="panel">
@@ -126,9 +127,11 @@
     </div>
   </div>
 
+  <p class="note"><a href="admin.html">관리자 화면 열기</a> (관리자 전용)</p>
   <p class="note">고개를 깊이 숙여 책을 읽으면 눈을 감은 것으로 잘못 판정될 수 있습니다. 실제 운영에서는 자동 벌점보다 관리자 확인용 알림으로 쓰는 것을 권합니다.</p>
 </main>
 
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="module">
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
@@ -222,6 +225,50 @@ $("testNotify").addEventListener("click", () => {
   nSay("보내는 중…"); notify("테스트 알림", false);
 });
 
+// --- 관리자 화면 실시간 연결 (영상 + 상태, PeerJS) ---
+let peer = null, link = null, call = null, linkTimer = null, lastTry = 0;
+const lSay = (t) => { $("lMsg").textContent = t; };
+const getTopic = () => $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
+const adminId = () => "dsm-" + getTopic() + "-admin";
+function sendStatus() {
+  if (!link || !link.open) return;
+  try { link.send({ name: $("who").value.trim() || "이름 미입력", state, total }); } catch (e) { /* 다음 주기에 재시도 */ }
+}
+function sendVideo() {
+  if (!peer || !link || !link.open || !stream) return;
+  try { if (call) call.close(); } catch (e) {}
+  try { call = peer.call(adminId(), stream); } catch (e) { call = null; }
+}
+function tryLink() {
+  if (!peer || peer.destroyed || !peer.open) return;
+  lastTry = Date.now();
+  try { if (link) link.close(); } catch (e) {}
+  const c = peer.connect(adminId(), { reliable: true }); link = c;
+  c.on("open", () => { lSay("관리자 화면에 연결됨"); sendStatus(); sendVideo(); });
+  c.on("close", () => { if (link === c) lSay("관리자 화면과 연결이 끊겼습니다. 다시 시도 중…"); });
+}
+function startLink() {
+  if (!getTopic()) { lSay("관리 코드를 입력하고 다시 시작하면 관리자 화면에 영상과 상태가 전송됩니다."); return; }
+  if (!window.Peer) { lSay("실시간 연결 모듈을 불러오지 못했습니다."); return; }
+  lSay("관리자 화면 연결 중…");
+  peer = new window.Peer();
+  peer.on("open", () => tryLink());
+  peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
+  peer.on("error", (e) => {
+    if (e && e.type === "peer-unavailable") lSay("관리자 화면이 아직 열려 있지 않습니다. 열리면 자동으로 연결됩니다.");
+    else lSay("연결 오류: " + (e && e.type ? e.type : e));
+  });
+  linkTimer = setInterval(() => {
+    if (link && link.open) sendStatus();
+    else if (Date.now() - lastTry > 10000) tryLink();
+  }, 2000);
+}
+function stopLink() {
+  clearInterval(linkTimer); linkTimer = null;
+  try { if (peer) peer.destroy(); } catch (e) {}
+  peer = link = call = null;
+}
+
 // --- 감지 루프 ---
 function tick() {
   if (!landmarker) return;
@@ -267,6 +314,7 @@ async function openCamera() {
   stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: "user" }, audio: false });
   stream.getVideoTracks()[0].addEventListener("ended", () => recover());
   video.srcObject = stream; await video.play();
+  sendVideo(); // 카메라가 다시 연결되면 관리자 화면에도 새 영상 전송
 }
 async function recover() { // 화면이 꺼졌다 켜지면 카메라가 끊기므로 다시 연결
   if (recovering || !timer || document.visibilityState !== "visible") return;
@@ -321,7 +369,7 @@ $("start").addEventListener("click", async () => {
     lastTick = now; lastFace = now; closedSince = 0;
     badge.hidden = false; faceTag.hidden = false; faceTag.textContent = "확인 중…"; setState("study");
     timer = setInterval(tick, 200); // 초당 5회면 충분
-    keepAwake();
+    keepAwake(); startLink();
     $("stop").disabled = false; say("감지 중");
   } catch (e) {
     console.error(e);
@@ -334,7 +382,7 @@ $("start").addEventListener("click", async () => {
 });
 
 function stopAll() {
-  clearInterval(timer); timer = null;
+  clearInterval(timer); timer = null; stopLink();
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   video.srcObject = null;
