@@ -41,13 +41,29 @@
   .meta { padding: 10px 12px; }
   .meta b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  button.ghost { background: transparent; color: var(--ink); }
+  .meta button { margin-top: 8px; padding: 6px 12px; font-size: 13px; background: transparent; color: var(--ink); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 12px; z-index: 10; }
+  .modal[hidden] { display: none; }
+  .box { background: var(--panel); border-radius: 12px; padding: 14px; width: min(640px, 100%); max-height: 100%; overflow: auto; }
+  .phead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  #pImg { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #1f2a2e; border-radius: 8px; display: block; }
+  #pTime { font-variant-numeric: tabular-nums; font-weight: 700; margin-top: 8px; }
+  #pSeek { width: 100%; accent-color: var(--ink); }
+  .prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+  .prow .msg { flex-basis: auto; }
+  .ptitle { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  .pevents { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pevents button { padding: 5px 10px; font-size: 13px; background: transparent; color: var(--ink); border-color: var(--line); }
+  .pevents button[data-s="away"] { border-color: var(--away); }
+  .pevents button[data-s="drowsy"] { border-color: var(--drowsy); }
   .empty { color: var(--muted); font-size: 14px; padding: 32px 8px; text-align: center; }
 </style>
 </head>
 <body>
 <main>
   <h1>관리자 화면</h1>
-  <p class="sub">같은 관리 코드를 입력한 학생들의 영상과 상태가 실시간으로 표시됩니다.</p>
+  <p class="sub">같은 관리 코드를 입력한 학생들의 영상과 상태가 실시간으로 표시됩니다. 화면은 2초마다 한 장씩 이 기기에만 기록되며, 이 페이지를 닫거나 새로고침하면 지워집니다.</p>
 
   <div class="bar">
     <input type="text" id="topic" placeholder="관리 코드 (영문·숫자·-·_)" maxlength="64" autocomplete="off" autocapitalize="off">
@@ -62,6 +78,22 @@
   <div class="grid" id="grid"></div>
   <p class="empty" id="empty" hidden>아직 접속한 학생이 없습니다. 학생 화면에서 같은 관리 코드를 입력하고 「카메라 시작」을 누르면 여기에 나타납니다.</p>
 </main>
+
+<div class="modal" id="player" hidden>
+  <div class="box">
+    <div class="phead"><b id="pName"></b><button id="pClose" class="ghost">닫기</button></div>
+    <img id="pImg" alt="기록된 화면">
+    <div id="pTime">—</div>
+    <input type="range" id="pSeek" min="0" max="0" value="0" aria-label="시간 이동">
+    <div class="prow">
+      <button id="pPlay">재생 (8배속)</button>
+      <button id="pLast" class="ghost">최신으로</button>
+      <span class="msg" id="pInfo"></span>
+    </div>
+    <p class="ptitle">알림이 뜬 시각 — 누르면 그 20초 전으로 이동합니다</p>
+    <div class="pevents" id="pEvents"></div>
+  </div>
+</div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
@@ -99,6 +131,7 @@
     var prev = t.state; t.state = s;
     t.el.dataset.s = s; t.badge.textContent = LABEL[s] || s;
     if (prev && (s === "away" || s === "drowsy")) beep();
+    if (prev && prev !== "idle" && s !== "idle") { t.events.push({ t: Date.now(), s: s }); if (cur === t) renderEvents(); }
     summarize();
   }
   function summarize() {
@@ -112,10 +145,12 @@
     var t = tiles.get(id); if (t) return t;
     var el = document.createElement("article"); el.className = "tile";
     el.innerHTML = '<div class="stage"><video autoplay playsinline muted></video><span class="badge"></span></div>' +
-                   '<div class="meta"><b></b><span></span></div>';
+                   '<div class="meta"><b></b><span></span><br><button type="button">기록 보기</button></div>';
     $("grid").append(el);
     t = { el: el, video: el.querySelector("video"), badge: el.querySelector(".badge"),
-          name: el.querySelector("b"), times: el.querySelector(".meta span"), last: Date.now(), state: "", who: "" };
+          name: el.querySelector("b"), times: el.querySelector(".meta span"), last: Date.now(), state: "", who: "",
+          frames: [], events: [] }; // frames: 2초마다 한 장, events: 상태 변화 시각
+    el.querySelector(".meta button").addEventListener("click", function () { openPlayer(t); });
     t.name.textContent = "연결 중…";
     tiles.set(id, t); setTileState(t, "idle");
     return t;
@@ -127,7 +162,11 @@
     if (who !== t.who) {
       t.who = who; t.name.textContent = who;
       tiles.forEach(function (o, oid) { // 같은 이름으로 다시 접속하면 끊긴 옛 타일 정리
-        if (oid !== id && o.who === who && (o.state === "off" || o.state === "lost")) { o.el.remove(); tiles.delete(oid); }
+        if (oid !== id && o.who === who && (o.state === "off" || o.state === "lost")) {
+          t.frames = o.frames.concat(t.frames); t.events = o.events.concat(t.events); // 기록은 이어받음
+          if (cur === o) cur = t;
+          o.el.remove(); tiles.delete(oid);
+        }
       });
     }
     var tot = d.total || {};
@@ -139,6 +178,79 @@
     var now = Date.now();
     tiles.forEach(function (t) { if (t.state !== "off" && t.state !== "lost" && now - t.last > 8000) setTileState(t, "lost"); });
   }, 2000);
+
+  // --- 녹화: 학생별로 2초마다 화면 한 장을 이 브라우저 메모리에 보관 ---
+  var MAX_FRAMES = 7200; // 학생당 약 4시간
+  var canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+  setInterval(function () {
+    tiles.forEach(function (t) {
+      var v = t.video;
+      if (!v.videoWidth || t.state === "off" || t.state === "lost") return;
+      canvas.width = 320; canvas.height = Math.round(320 * v.videoHeight / v.videoWidth);
+      try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
+      var at = Date.now();
+      canvas.toBlob(function (b) {
+        if (!b) return;
+        t.frames.push({ t: at, b: b });
+        if (t.frames.length > MAX_FRAMES) t.frames.shift();
+        if (cur === t) syncSeek();
+      }, "image/jpeg", 0.5);
+    });
+  }, 2000);
+
+  // --- 재생기 ---
+  var cur = null, curUrl = null, playTimer = null, pos = 0;
+  function clock(ms) { return new Date(ms).toLocaleTimeString("ko-KR", { hour12: false }); }
+  function syncSeek() {
+    var n = cur ? cur.frames.length : 0;
+    $("pSeek").max = Math.max(0, n - 1);
+    $("pInfo").textContent = n ? "기록 " + clock(cur.frames[0].t) + " ~ " + clock(cur.frames[n - 1].t)
+                               : "아직 기록이 없습니다. 학생 영상이 연결돼야 기록됩니다.";
+  }
+  function showFrame(i) {
+    if (!cur || !cur.frames.length) return;
+    pos = Math.min(Math.max(0, i), cur.frames.length - 1);
+    var f = cur.frames[pos];
+    if (curUrl) URL.revokeObjectURL(curUrl);
+    curUrl = URL.createObjectURL(f.b);
+    $("pImg").src = curUrl; $("pTime").textContent = clock(f.t); $("pSeek").value = pos;
+  }
+  function stopPlay() { clearInterval(playTimer); playTimer = null; $("pPlay").textContent = "재생 (8배속)"; }
+  function renderEvents() {
+    var box = $("pEvents"); box.textContent = "";
+    var list = cur.events.filter(function (e) { return e.s === "away" || e.s === "drowsy" || e.s === "lost"; });
+    if (!list.length) { box.textContent = "아직 알림이 없습니다."; return; }
+    list.forEach(function (e) {
+      var b = document.createElement("button"); b.type = "button"; b.dataset.s = e.s;
+      b.textContent = clock(e.t) + " " + LABEL[e.s];
+      b.addEventListener("click", function () {
+        stopPlay();
+        var i = 0; while (i < cur.frames.length - 1 && cur.frames[i].t < e.t - 20000) i++;
+        showFrame(i);
+      });
+      box.append(b);
+    });
+  }
+  function openPlayer(t) {
+    cur = t; stopPlay();
+    $("pName").textContent = (t.who || "학생") + " — 기록 보기";
+    $("pImg").removeAttribute("src"); $("pTime").textContent = "—";
+    syncSeek(); renderEvents(); showFrame(t.frames.length - 1);
+    $("player").hidden = false;
+  }
+  $("pClose").addEventListener("click", function () { stopPlay(); cur = null; $("player").hidden = true; });
+  $("pSeek").addEventListener("input", function () { stopPlay(); showFrame(Number($("pSeek").value)); });
+  $("pLast").addEventListener("click", function () { stopPlay(); if (cur) showFrame(cur.frames.length - 1); });
+  $("pPlay").addEventListener("click", function () {
+    if (playTimer) { stopPlay(); return; }
+    if (!cur || !cur.frames.length) return;
+    if (pos >= cur.frames.length - 1) showFrame(0);
+    $("pPlay").textContent = "일시정지";
+    playTimer = setInterval(function () {
+      if (!cur || pos >= cur.frames.length - 1) { stopPlay(); return; }
+      showFrame(pos + 1);
+    }, 250);
+  });
 
   $("go").addEventListener("click", function () {
     var topic = $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
