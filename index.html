@@ -41,7 +41,14 @@
   .msg { font-size: 14px; color: var(--muted); }
   .msg.err { color: var(--drowsy); }
   h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
+  .stat.k b { color: #3b6ea5; }
+  .badge[data-s="break"] { background: #3b6ea5; }
+  .wake { position: fixed; inset: 0; z-index: 20; background: rgba(192,57,43,.95); color: #fff;
+    display: grid; place-items: center; text-align: center; padding: 24px; }
+  .wake[hidden] { display: none; }
+  .wake p { font-size: 28px; font-weight: 800; margin: 0 0 20px; }
+  .wake button { font-size: 20px; padding: 14px 40px; background: #fff; color: var(--drowsy); border-color: #fff; }
   .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
   .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .stat span { font-size: 12px; color: var(--muted); }
@@ -82,6 +89,11 @@
         <button id="stop" class="ghost" disabled>중지</button>
         <span class="msg" id="msg"></span>
       </div>
+      <div class="row">
+        <button id="brkToilet" class="ghost" disabled>화장실</button>
+        <button id="brkRest" class="ghost" disabled>식사·휴식</button>
+        <button id="brkEnd" hidden>공부 재개</button>
+      </div>
     </section>
 
     <div class="stack">
@@ -91,6 +103,7 @@
           <div class="stat s"><b id="tStudy">00:00</b><span>공부</span></div>
           <div class="stat a"><b id="tAway">00:00</b><span>자리비움</span></div>
           <div class="stat d"><b id="tDrowsy">00:00</b><span>졸음 의심</span></div>
+          <div class="stat k"><b id="tBreak">00:00</b><span>휴식</span></div>
         </div>
       </section>
 
@@ -130,18 +143,19 @@
   <p class="note"><a href="admin.html">관리자 화면 열기</a> (관리자 전용)</p>
   <p class="note">고개를 깊이 숙여 책을 읽으면 눈을 감은 것으로 잘못 판정될 수 있습니다. 실제 운영에서는 자동 벌점보다 관리자 확인용 알림으로 쓰는 것을 권합니다.</p>
 </main>
+<div class="wake" id="wake" hidden><div><p>관리자가 호출했습니다</p><button id="wakeOk">확인</button></div></div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="module">
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-const LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중" };
+const LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", break: "휴식 중" };
 const $ = (id) => document.getElementById(id);
 
 const video = $("video"), stage = $("stage"), badge = $("badge"), msg = $("msg"), faceTag = $("faceTag");
 let landmarker = null, stream = null, timer = null, audio = null;
 let state = "idle", lastTick = 0, lastFace = 0, closedSince = 0, lastOpen = 0;
-const total = { study: 0, away: 0, drowsy: 0 };
+const total = { study: 0, away: 0, drowsy: 0, break: 0 };
 
 // --- 설정 슬라이더 ---
 const cfg = { away: 30, drowsy: 8, thr: 0.6 };
@@ -164,6 +178,7 @@ function renderTotals() {
   $("tStudy").textContent = fmt(total.study);
   $("tAway").textContent = fmt(total.away);
   $("tDrowsy").textContent = fmt(total.drowsy);
+  $("tBreak").textContent = fmt(total.break);
 }
 function addLog(text) {
   const log = $("log");
@@ -187,6 +202,7 @@ function setState(next) {
   badge.textContent = LABEL[next]; badge.dataset.s = next; stage.dataset.s = next;
   if (next === "idle") return;
   if (next === "study") addLog(prev === "idle" ? "공부 시작" : `복귀 (${LABEL[prev]} 해제)`);
+  else if (next === "break") addLog(`휴식 시작 (${breakReason})`);
   else { addLog(`${LABEL[next]} 감지`); beep(); notify(`${LABEL[next]} 감지`, true); }
 }
 
@@ -232,7 +248,7 @@ const getTopic = () => $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
 const adminId = () => "dsm-" + getTopic() + "-admin";
 function sendStatus() {
   if (!link || !link.open) return;
-  try { link.send({ name: $("who").value.trim() || "이름 미입력", state, total }); } catch (e) { /* 다음 주기에 재시도 */ }
+  try { link.send({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "" }); } catch (e) { /* 다음 주기에 재시도 */ }
 }
 function sendVideo() {
   if (!peer || !link || !link.open || !stream) return;
@@ -245,6 +261,7 @@ function tryLink() {
   try { if (link) link.close(); } catch (e) {}
   const c = peer.connect(adminId(), { reliable: true }); link = c;
   c.on("open", () => { lSay("관리자 화면에 연결됨"); sendStatus(); sendVideo(); });
+  c.on("data", (d) => { if (d && d.cmd === "wake") wakeUp(); });
   c.on("close", () => { if (link === c) lSay("관리자 화면과 연결이 끊겼습니다. 다시 시도 중…"); });
 }
 function startLink() {
@@ -269,6 +286,51 @@ function stopLink() {
   peer = link = call = null;
 }
 
+// --- 휴식 (화장실·식사) ---
+let onBreak = false, breakReason = "", breakLeft = false, goneSince = 0;
+function breakButtons() {
+  const running = !!timer;
+  $("brkToilet").hidden = $("brkRest").hidden = onBreak;
+  $("brkToilet").disabled = $("brkRest").disabled = !running;
+  $("brkEnd").hidden = !onBreak;
+}
+function startBreak(reason) {
+  if (!timer) return;
+  onBreak = true; breakReason = reason; breakLeft = false; goneSince = 0;
+  breakButtons(); setState("break"); sendStatus();
+}
+function endBreak() {
+  if (!onBreak) return;
+  onBreak = false; lastFace = Date.now(); closedSince = 0;
+  breakButtons();
+}
+$("brkToilet").addEventListener("click", () => startBreak("화장실"));
+$("brkRest").addEventListener("click", () => startBreak("식사·휴식"));
+$("brkEnd").addEventListener("click", endBreak);
+
+// --- 관리자 호출 (깨우기) ---
+let wakeTimer = null;
+function wakeUp() {
+  if (!timer) return;
+  addLog("관리자 호출");
+  $("wake").hidden = false;
+  clearInterval(wakeTimer);
+  const ring = () => {
+    if (!audio) return;
+    try {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "square"; o.frequency.value = 1000; g.gain.value = 0.3;
+      o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.35);
+    } catch (e) { /* 소리 실패해도 화면 표시는 유지 */ }
+  };
+  ring(); wakeTimer = setInterval(ring, 700);
+}
+function wakeDone(ack) {
+  clearInterval(wakeTimer); wakeTimer = null; $("wake").hidden = true;
+  if (ack) { addLog("관리자 호출 확인"); try { if (link && link.open) link.send({ ack: "wake" }); } catch (e) {} }
+}
+$("wakeOk").addEventListener("click", () => wakeDone(true));
+
 // --- 감지 루프 ---
 function tick() {
   if (!landmarker) return;
@@ -280,8 +342,8 @@ function tick() {
 
   const dt = now - lastTick; lastTick = now;
   if (dt > 3000) { // 화면 꺼짐·앱 전환 등으로 분석이 끊긴 시간은 자리비움으로 기록
-    total.away += dt; lastFace = now; closedSince = 0;
-    addLog(`화면 꺼짐·앱 전환 ${Math.round(dt / 1000)}초 — 자리비움으로 기록`);
+    total[onBreak ? "break" : "away"] += dt; lastFace = now; closedSince = 0;
+    if (!onBreak) addLog(`화면 꺼짐·앱 전환 ${Math.round(dt / 1000)}초 — 자리비움으로 기록`);
   } else if (state !== "idle") total[state] += dt;
 
   const hasFace = !!(res.faceLandmarks && res.faceLandmarks.length);
@@ -298,6 +360,12 @@ function tick() {
     closedSince = 0;
   }
   $("eyeBar").style.width = Math.round(eye * 100) + "%";
+
+  if (onBreak) { // 휴식 중에는 자리비움·졸음으로 세지 않음. 자리를 떴다가 돌아오면 자동으로 공부 재개
+    if (!hasFace) { if (!goneSince) goneSince = now; if (now - goneSince > 5000) breakLeft = true; }
+    else { goneSince = 0; if (breakLeft) endBreak(); }
+  }
+  if (onBreak) { lastFace = now; closedSince = 0; setState("break"); renderTotals(); return; }
 
   let next = "study";
   if (now - lastFace >= cfg.away * 1000) next = "away";
@@ -369,7 +437,7 @@ $("start").addEventListener("click", async () => {
     lastTick = now; lastFace = now; closedSince = 0;
     badge.hidden = false; faceTag.hidden = false; faceTag.textContent = "확인 중…"; setState("study");
     timer = setInterval(tick, 200); // 초당 5회면 충분
-    keepAwake(); startLink();
+    keepAwake(); startLink(); breakButtons();
     $("stop").disabled = false; say("감지 중");
   } catch (e) {
     console.error(e);
@@ -390,6 +458,7 @@ function stopAll() {
   if (state !== "idle") addLog("모니터링 종료");
   setState("idle"); delete stage.dataset.s;
   $("eyeBar").style.width = "0";
+  onBreak = false; breakButtons(); wakeDone(false);
   $("start").disabled = false; $("stop").disabled = true;
 }
 $("stop").addEventListener("click", () => { stopAll(); say("중지됨"); });

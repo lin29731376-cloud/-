@@ -38,6 +38,8 @@
   .tile[data-s="study"] .badge { background: var(--study); }
   .tile[data-s="away"] .badge { background: var(--away); }
   .tile[data-s="drowsy"] .badge { background: var(--drowsy); }
+  .tile[data-s="break"] .badge { background: #3b6ea5; }
+  .meta button + button { margin-left: 6px; }
   .meta { padding: 10px 12px; }
   .meta b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -73,7 +75,7 @@
 
   <div class="summary" id="summary" hidden>
     <span>접속 <b id="cAll">0</b></span><span>공부 중 <b id="cStudy">0</b></span>
-    <span>자리비움 <b id="cAway">0</b></span><span>졸음 의심 <b id="cDrowsy">0</b></span>
+    <span>자리비움 <b id="cAway">0</b></span><span>졸음 의심 <b id="cDrowsy">0</b></span><span>휴식 <b id="cBreak">0</b></span>
   </div>
   <div class="grid" id="grid"></div>
   <p class="empty" id="empty" hidden>아직 접속한 학생이 없습니다. 학생 화면에서 같은 관리 코드를 입력하고 「카메라 시작」을 누르면 여기에 나타납니다.</p>
@@ -99,7 +101,7 @@
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", lost: "응답 없음", off: "연결 끊김" };
+  var LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", lost: "응답 없음", off: "연결 끊김", break: "휴식 중" };
   var tiles = new Map(); // 학생 연결 ID -> 타일
   var peer = null, audio = null, wakeLock = null;
 
@@ -135,29 +137,40 @@
     summarize();
   }
   function summarize() {
-    var c = { all: 0, study: 0, away: 0, drowsy: 0 };
+    var c = { all: 0, study: 0, away: 0, drowsy: 0, break: 0 };
     tiles.forEach(function (t) { if (t.state !== "off") c.all++; if (c[t.state] !== undefined) c[t.state]++; });
     $("cAll").textContent = c.all; $("cStudy").textContent = c.study;
-    $("cAway").textContent = c.away; $("cDrowsy").textContent = c.drowsy;
+    $("cAway").textContent = c.away; $("cDrowsy").textContent = c.drowsy; $("cBreak").textContent = c.break;
     $("empty").hidden = tiles.size > 0;
   }
   function getTile(id) {
     var t = tiles.get(id); if (t) return t;
     var el = document.createElement("article"); el.className = "tile";
     el.innerHTML = '<div class="stage"><video autoplay playsinline muted></video><span class="badge"></span></div>' +
-                   '<div class="meta"><b></b><span></span><br><button type="button">기록 보기</button></div>';
+                   '<div class="meta"><b></b><span></span><br><button type="button">기록 보기</button><button type="button" class="wakeBtn">깨우기</button></div>';
     $("grid").append(el);
     t = { el: el, video: el.querySelector("video"), badge: el.querySelector(".badge"),
           name: el.querySelector("b"), times: el.querySelector(".meta span"), last: Date.now(), state: "", who: "",
           frames: [], events: [] }; // frames: 2초마다 한 장, events: 상태 변화 시각
     el.querySelector(".meta button").addEventListener("click", function () { openPlayer(t); });
+    t.wakeBtn = el.querySelector(".wakeBtn");
+    t.wakeBtn.addEventListener("click", function () {
+      var ok = false;
+      try { if (t.conn && t.conn.open) { t.conn.send({ cmd: "wake" }); ok = true; } } catch (e) {}
+      wakeLabel(t, ok ? "호출 중…" : "연결 안 됨", ok ? 60000 : 3000);
+    });
     t.name.textContent = "연결 중…";
     tiles.set(id, t); setTileState(t, "idle");
     return t;
   }
+  function wakeLabel(t, text, ms) {
+    t.wakeBtn.textContent = text; clearTimeout(t.wakeTimer);
+    t.wakeTimer = setTimeout(function () { t.wakeBtn.textContent = "깨우기"; }, ms);
+  }
   function onData(id, d) {
     if (!d || typeof d !== "object") return;
     var t = getTile(id); t.last = Date.now();
+    if (d.ack === "wake") { wakeLabel(t, "확인함 ✓", 4000); return; }
     var who = String(d.name || "이름 미입력").slice(0, 20);
     if (who !== t.who) {
       t.who = who; t.name.textContent = who;
@@ -170,8 +183,9 @@
       });
     }
     var tot = d.total || {};
-    t.times.textContent = "공부 " + fmt(tot.study) + " · 자리비움 " + fmt(tot.away) + " · 졸음 " + fmt(tot.drowsy);
+    t.times.textContent = "공부 " + fmt(tot.study) + " · 자리비움 " + fmt(tot.away) + " · 졸음 " + fmt(tot.drowsy) + " · 휴식 " + fmt(tot.break);
     setTileState(t, LABEL[d.state] ? d.state : "idle");
+    if (d.state === "break" && d.reason) t.badge.textContent = "휴식 중 · " + String(d.reason).slice(0, 10);
   }
 
   setInterval(function () { // 학생 쪽 화면이 꺼지거나 페이지를 닫으면 '응답 없음'
@@ -267,7 +281,7 @@
       $("summary").hidden = false; summarize(); keepAwake();
     });
     peer.on("connection", function (conn) {
-      getTile(conn.peer);
+      getTile(conn.peer).conn = conn;
       conn.on("data", function (d) { onData(conn.peer, d); });
       conn.on("close", function () { var t = tiles.get(conn.peer); if (t) setTileState(t, "off"); });
     });
