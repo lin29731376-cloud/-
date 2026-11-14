@@ -49,6 +49,8 @@
   label { display: block; font-size: 13px; margin-top: 12px; }
   label output { float: right; font-variant-numeric: tabular-nums; color: var(--muted); }
   input[type=range] { width: 100%; margin-top: 4px; accent-color: var(--ink); }
+  input[type=text] { width: 100%; margin-top: 4px; padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 8px; font: inherit; background: #fff; color: var(--ink); }
   .meter { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 6px; position: relative; }
   .meter i { display: block; height: 100%; width: 0; background: var(--ink); }
   .meter em { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--drowsy); }
@@ -103,6 +105,18 @@
         <label>현재 눈 감김 정도 (빨간 선을 넘으면 감은 것으로 판정)
           <div class="meter"><i id="eyeBar"></i><em id="eyeMark"></em></div></label>
         <label class="check"><input type="checkbox" id="beep" checked> 졸음·자리비움 감지 시 알림음</label>
+      </section>
+
+      <section class="panel">
+        <h2>관리자 알림</h2>
+        <label>학생 이름
+          <input type="text" id="who" placeholder="예: 홍길동" maxlength="20" autocomplete="off"></label>
+        <label>알림 채널 이름 (관리자가 ntfy 앱에서 구독한 이름)
+          <input type="text" id="topic" placeholder="영문·숫자·-·_ 만 가능" maxlength="64" autocomplete="off" autocapitalize="off"></label>
+        <div class="row">
+          <button id="testNotify" class="ghost">테스트 알림 보내기</button>
+          <span class="msg" id="nMsg"></span>
+        </div>
       </section>
 
       <section class="panel">
@@ -170,8 +184,43 @@ function setState(next) {
   badge.textContent = LABEL[next]; badge.dataset.s = next; stage.dataset.s = next;
   if (next === "idle") return;
   if (next === "study") addLog(prev === "idle" ? "공부 시작" : `복귀 (${LABEL[prev]} 해제)`);
-  else { addLog(`${LABEL[next]} 감지`); beep(); }
+  else { addLog(`${LABEL[next]} 감지`); beep(); notify(`${LABEL[next]} 감지`, true); }
 }
+
+// --- 관리자 알림 (ntfy.sh 로 전송) ---
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 저장 안 돼도 동작 */ } },
+};
+for (const id of ["who", "topic"]) {
+  $(id).value = store.get("sm_" + id);
+  $(id).addEventListener("change", () => {
+    if (id === "topic") $(id).value = $(id).value.replace(/[^A-Za-z0-9_-]/g, "");
+    store.set("sm_" + id, $(id).value.trim());
+  });
+}
+function nSay(text, err) { $("nMsg").textContent = text; $("nMsg").classList.toggle("err", !!err); }
+async function notify(what, urgent) {
+  const topic = $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
+  if (!topic) return false;
+  const who = $("who").value.trim() || "이름 미입력";
+  const at = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+  try {
+    const r = await fetch("https://ntfy.sh/", {
+      method: "POST",
+      body: JSON.stringify({ topic, title: `${who} — ${what}`, message: `${at} 독서실 모니터`,
+                             priority: urgent ? 4 : 3, tags: [urgent ? "warning" : "bell"] }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    nSay(`알림 보냄 (${at})`); return true;
+  } catch (e) {
+    nSay("알림 전송 실패: " + (e && e.message ? e.message : e), true); return false;
+  }
+}
+$("testNotify").addEventListener("click", () => {
+  if (!$("topic").value.trim()) { nSay("알림 채널 이름을 먼저 입력하세요.", true); return; }
+  nSay("보내는 중…"); notify("테스트 알림", false);
+});
 
 // --- 감지 루프 ---
 function tick() {
