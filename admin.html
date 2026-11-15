@@ -79,6 +79,7 @@
     <button id="go">관리 시작</button>
     <button id="logout" class="ghost">로그아웃</button>
     <span class="msg" id="msg">「관리 시작」을 누르세요. 이 화면은 켜 둔 채로 두어야 합니다.</span>
+    <span class="msg" id="lkMsg"></span>
   </div>
 
   <div class="bar" style="margin-top:12px">
@@ -123,6 +124,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
 <script>window.SM_REQUIRE = "admin";</script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
 <script src="auth.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
@@ -183,7 +185,8 @@
     t.wakeBtn = el.querySelector(".wakeBtn");
     t.wakeBtn.addEventListener("click", function () {
       var ok = false;
-      try { if (t.conn && t.conn.open) { t.conn.send({ cmd: "wake" }); ok = true; t.wakes++; } } catch (e) {}
+      try { ok = !!(t.send && t.send({ cmd: "wake" })); } catch (e) {}
+      if (ok) t.wakes++;
       wakeLabel(t, ok ? "호출 중…" : "연결 안 됨", ok ? 60000 : 3000);
     });
     t.name.textContent = "연결 중…";
@@ -327,6 +330,48 @@
     try { navigator.clipboard.writeText($("rText").value).then(done, manual); } catch (e) { manual(); }
   });
 
+  // --- 영상 서버(LiveKit): 설정돼 있으면 사용, 아니면 예전 방식만 동작 ---
+  var lkRoom = null;
+  function lkNote(text) { $("lkMsg").textContent = text; }
+  function startLkAdmin() {
+    if (lkRoom || !window.LivekitClient || !window.sb) return;
+    window.sb.functions.invoke("livekit-token", { body: { as: "admin" } }).then(function (r) {
+      if (r.error || !r.data || !r.data.token) { lkNote("영상 서버 미설정 — 예전 연결 방식으로 동작 중"); return; }
+      var LK = window.LivekitClient, room = new LK.Room();
+      var enc = new TextEncoder(), dec = new TextDecoder();
+      function bind(p) { // 학생 참가자 → 타일
+        if (!p || p.identity.indexOf("stu-") !== 0) return null;
+        var t = getTile("lk:" + p.identity);
+        t.send = function (o) {
+          room.localParticipant.publishData(enc.encode(JSON.stringify(o)), { reliable: true, destinationIdentities: [p.identity] });
+          return true;
+        };
+        return t;
+      }
+      room.on(LK.RoomEvent.ParticipantConnected, bind);
+      room.on(LK.RoomEvent.TrackSubscribed, function (track, pub, p) {
+        var t = bind(p); if (t && track.kind === "video") track.attach(t.video);
+      });
+      room.on(LK.RoomEvent.DataReceived, function (payload, p) {
+        if (!bind(p)) return;
+        try { onData("lk:" + p.identity, JSON.parse(dec.decode(payload))); } catch (e) {}
+      });
+      room.on(LK.RoomEvent.ParticipantDisconnected, function (p) {
+        var t = tiles.get("lk:" + p.identity); if (t) setTileState(t, "off");
+      });
+      room.on(LK.RoomEvent.Disconnected, function () {
+        if (lkRoom !== room) return;
+        lkRoom = null; lkNote("영상 서버 연결이 끊겨 다시 연결하는 중…"); setTimeout(startLkAdmin, 5000);
+      });
+      lkRoom = room;
+      room.connect(r.data.url, r.data.token).then(function () {
+        lkNote("영상 서버 연결됨"); room.remoteParticipants.forEach(bind);
+      }, function (e) {
+        lkRoom = null; lkNote("영상 서버 연결 실패: " + (e && e.message ? e.message : e));
+      });
+    }, function () { lkNote("영상 서버 미설정 — 예전 연결 방식으로 동작 중"); });
+  }
+
   // --- 로그인 · 회원 관리 ---
   var ROLE_TEXT = { pending: "승인 대기", student: "학생", admin: "관리자" };
   function loadMembers() {
@@ -369,6 +414,7 @@
     if (!topic) { say("계정 설정을 불러오지 못했습니다. 새로고침하세요.", true); return; }
     if (!window.Peer) { say("실시간 연결 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침하세요.", true); return; }
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
+    startLkAdmin();
     $("go").disabled = true; say("연결 중…");
 
     peer = new window.Peer("dsm-" + topic + "-admin");
@@ -377,7 +423,7 @@
       $("summary").hidden = false; summarize(); keepAwake();
     });
     peer.on("connection", function (conn) {
-      getTile(conn.peer).conn = conn;
+      getTile(conn.peer).send = function (o) { if (!conn.open) return false; conn.send(o); return true; };
       conn.on("data", function (d) { onData(conn.peer, d); });
       conn.on("close", function () { var t = tiles.get(conn.peer); if (t) setTileState(t, "off"); });
     });

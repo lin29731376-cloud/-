@@ -146,6 +146,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
 <script src="auth.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="module">
@@ -233,19 +234,67 @@ async function notify(what, urgent) {
   }
 }
 
-// --- 관리자 화면 실시간 연결 (영상 + 상태, PeerJS) ---
+// --- 관리자 화면 실시간 연결: 영상 서버(LiveKit) 우선, 안 되면 예전 방식(PeerJS) ---
 let peer = null, link = null, call = null, linkTimer = null, lastTry = 0;
+let lk = null, lkRetry = null, linkGen = 0; // lk: { room, pub }
 const lSay = (t) => { $("lMsg").textContent = t; };
-const getTopic = () => $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
 const adminId = () => "dsm-" + $("room").value + "-admin";
-function sendStatus() {
-  if (!link || !link.open) return;
-  try { link.send({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "" }); } catch (e) { /* 다음 주기에 재시도 */ }
+function sendMsg(obj) {
+  if (lk) {
+    if (lk.room.state !== "connected") return;
+    const to = [...lk.room.remoteParticipants.values()].map((p) => p.identity).filter((id) => id.startsWith("admin-"));
+    if (to.length) {
+      lk.room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(obj)),
+        { reliable: true, destinationIdentities: to }).catch(() => {});
+    }
+    return;
+  }
+  try { if (link && link.open) link.send(obj); } catch (e) { /* 다음 주기에 재시도 */ }
 }
-function sendVideo() {
+function sendStatus() {
+  sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "" });
+}
+async function sendVideo() {
+  if (lk) {
+    if (lk.room.state !== "connected" || !stream) return;
+    const src = stream.getVideoTracks()[0];
+    if (!src) return;
+    try { if (lk.pub && lk.pub.track) await lk.room.localParticipant.unpublishTrack(lk.pub.track); } catch (e) {}
+    // 복제본을 보내므로 영상 서버 쪽에서 트랙을 멈춰도 감지용 카메라는 영향이 없음
+    try { lk.pub = await lk.room.localParticipant.publishTrack(src.clone(), { simulcast: false }); }
+    catch (e) { lSay("영상 전송 실패: " + (e && e.message ? e.message : e)); }
+    return;
+  }
   if (!peer || !link || !link.open || !stream) return;
   try { if (call) call.close(); } catch (e) {}
   try { call = peer.call(adminId(), stream); } catch (e) { call = null; }
+}
+async function startLk(gen) { // 성공하면 true
+  let info = null;
+  try {
+    const r = await window.sb.functions.invoke("livekit-token", { body: { as: "student" } });
+    if (!r.error && r.data && r.data.token && r.data.url) info = r.data;
+  } catch (e) { /* 영상 서버 미설정 → 예전 방식 */ }
+  if (!info || gen !== linkGen) return false;
+  const { Room, RoomEvent } = window.LivekitClient;
+  const room = new Room();
+  const me = { room, pub: null };
+  room.on(RoomEvent.DataReceived, (payload, from) => { // 관리자가 보낸 명령만 받음
+    if (!from || !from.identity.startsWith("admin-")) return;
+    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); } catch (e) {}
+  });
+  room.on(RoomEvent.ParticipantConnected, () => sendStatus());
+  room.on(RoomEvent.Disconnected, () => {
+    if (lk !== me) return;
+    lk = null; lSay("영상 서버와 연결이 끊겼습니다. 다시 연결 중…");
+    lkRetry = setTimeout(() => { if (timer && gen === linkGen) connectLink(gen); }, 5000);
+  });
+  try { await room.connect(info.url, info.token); }
+  catch (e) { console.warn("영상 서버 연결 실패", e); return false; }
+  if (gen !== linkGen) { room.disconnect(); return true; }
+  lk = me; lSay("관리자 화면에 연결됨 (영상 서버)");
+  await sendVideo(); sendStatus();
+  return true;
 }
 function tryLink() {
   if (!peer || peer.destroyed || !peer.open) return;
@@ -256,10 +305,8 @@ function tryLink() {
   c.on("data", (d) => { if (d && d.cmd === "wake") wakeUp(); });
   c.on("close", () => { if (link === c) lSay("관리자 화면과 연결이 끊겼습니다. 다시 시도 중…"); });
 }
-function startLink() {
-  if (!$("room").value) { lSay("계정 설정을 불러오지 못해 관리자 화면에 연결할 수 없습니다."); return; }
+function startPeer() {
   if (!window.Peer) { lSay("실시간 연결 모듈을 불러오지 못했습니다."); return; }
-  lSay("관리자 화면 연결 중…");
   peer = new window.Peer();
   peer.on("open", () => tryLink());
   peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
@@ -267,15 +314,29 @@ function startLink() {
     if (e && e.type === "peer-unavailable") lSay("관리자 화면이 아직 열려 있지 않습니다. 열리면 자동으로 연결됩니다.");
     else lSay("연결 오류: " + (e && e.type ? e.type : e));
   });
+}
+async function connectLink(gen) {
+  if (window.LivekitClient && window.sb && await startLk(gen)) return;
+  if (gen !== linkGen || peer) return;
+  startPeer();
+}
+function startLink() {
+  if (!$("room").value) { lSay("계정 설정을 불러오지 못해 관리자 화면에 연결할 수 없습니다."); return; }
+  lSay("관리자 화면 연결 중…");
+  const gen = ++linkGen;
   linkTimer = setInterval(() => {
+    if (lk) { sendStatus(); return; }
+    if (!peer) return;
     if (link && link.open) sendStatus();
     else if (Date.now() - lastTry > 10000) tryLink();
   }, 2000);
+  connectLink(gen);
 }
 function stopLink() {
-  clearInterval(linkTimer); linkTimer = null;
+  linkGen++; clearInterval(linkTimer); linkTimer = null; clearTimeout(lkRetry);
+  try { if (lk) lk.room.disconnect(); } catch (e) {}
   try { if (peer) peer.destroy(); } catch (e) {}
-  peer = link = call = null;
+  lk = null; peer = link = call = null;
 }
 
 // --- 휴식 (화장실·식사) ---
@@ -320,7 +381,7 @@ function wakeUp() {
 }
 function wakeDone(ack) {
   clearInterval(wakeTimer); wakeTimer = null; $("wake").hidden = true;
-  if (ack) { addLog("관리자 호출 확인"); try { if (link && link.open) link.send({ ack: "wake" }); } catch (e) {} }
+  if (ack) { addLog("관리자 호출 확인"); sendMsg({ ack: "wake" }); }
 }
 $("wakeOk").addEventListener("click", () => wakeDone(true));
 
