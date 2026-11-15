@@ -68,7 +68,7 @@
   .cfg input { width: 100%; margin-top: 4px; accent-color: var(--ink); }
   .mrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0;
     border-bottom: 1px solid var(--line); font-size: 14px; }
-  .mrow span { min-width: 0; overflow-wrap: anywhere; }
+  .mrow span { min-width: 0; overflow-wrap: anywhere; flex: 1; }
   .mrow button { padding: 6px 12px; font-size: 13px; flex: none; }
   .empty { color: var(--muted); font-size: 14px; padding: 32px 8px; text-align: center; }
 </style>
@@ -433,6 +433,20 @@
             });
           });
           row.append(b);
+          var pb = document.createElement("button"); pb.type = "button"; pb.className = "ghost"; pb.textContent = "비밀번호 재설정";
+          pb.addEventListener("click", function () {
+            var pw = window.prompt((p.name || p.email) + " 님의 새 임시 비밀번호를 입력하세요 (6자 이상)");
+            if (pw === null) return;
+            if (pw.length < 6) { $("mMsg").textContent = "비밀번호는 6자 이상이어야 합니다."; return; }
+            pb.disabled = true; $("mMsg").textContent = "변경 중…";
+            window.sb.rpc("admin_set_password", { target: p.id, new_password: pw }).then(function (x) {
+              pb.disabled = false;
+              $("mMsg").textContent = x.error
+                ? "재설정 실패: " + x.error.message
+                : (p.name || p.email) + " 님의 비밀번호를 바꿨습니다. 임시 비밀번호를 알려주고, 로그인 후 직접 바꾸게 하세요.";
+            }, function (e) { pb.disabled = false; $("mMsg").textContent = "재설정 실패: " + e; });
+          });
+          row.append(pb);
         }
         box.append(row);
       });

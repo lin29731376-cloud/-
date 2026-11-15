@@ -146,6 +146,12 @@
           <button id="logout" class="ghost">로그아웃</button>
           <span class="msg" id="nMsg"></span>
         </div>
+        <div class="row">
+          <input type="password" id="newPw" placeholder="새 비밀번호 (6자 이상)" autocomplete="new-password" aria-label="새 비밀번호"
+            style="flex:1;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;color:var(--ink)">
+          <button id="pwSave" class="ghost">비밀번호 변경</button>
+        </div>
+        <p class="msg" id="pwMsg" style="margin:8px 0 0"></p>
         <p class="msg" id="lMsg" style="margin:10px 0 0"></p>
       </section>
 
@@ -401,6 +407,17 @@ async function initAccount() {
   $("topic").value = settings.ntfy_topic || ""; $("room").value = settings.room_code || "";
   $("meName").textContent = $("who").value; $("meEmail").textContent = profile.email || "";
   $("logout").addEventListener("click", () => { saveTotals(); logout(); });
+  $("pwSave").addEventListener("click", async () => { // 내 비밀번호 변경
+    const pw = $("newPw").value, say2 = (t, err) => { $("pwMsg").textContent = t; $("pwMsg").classList.toggle("err", !!err); };
+    if (pw.length < 6) { say2("비밀번호는 6자 이상이어야 합니다.", true); return; }
+    $("pwSave").disabled = true; say2("변경 중…");
+    try {
+      const { error } = await window.sb.auth.updateUser({ password: pw });
+      if (error) say2("변경 실패: " + error.message, true);
+      else { $("newPw").value = ""; say2("비밀번호를 변경했습니다."); }
+    } catch (e) { say2("변경 실패: " + (e && e.message ? e.message : e), true); }
+    $("pwSave").disabled = false;
+  });
   applyCfg({ away: settings.away_sec, drowsy: settings.drowsy_sec, thr: settings.eye_thr });
   try { // 오늘 이미 쌓인 시간이 있으면 이어서 누적
     const { data } = await window.sb.from("study_days").select("study_ms,away_ms,drowsy_ms,break_ms")
