@@ -397,6 +397,8 @@
       var box = $("members"); box.textContent = "";
       if (r.error) { $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + r.error.message; return; }
       $("mMsg").textContent = r.data.length ? "" : "아직 가입한 회원이 없습니다.";
+      r.data.forEach(function (m) { names[m.id] = m.name || m.email || "(이름 없음)"; });
+      loadHistory(); // 이름을 알고 난 뒤에 기록 표시
       r.data.forEach(function (p) {
         names[p.id] = p.name || p.email || "(이름 없음)";
         var row = document.createElement("div"); row.className = "mrow";
@@ -475,7 +477,7 @@
     $("topic").value = window.smAuth.settings.room_code || "";
     var now = new Date(), p2 = function (x) { return String(x).padStart(2, "0"); };
     $("hDay").value = now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate());
-    loadMembers(); loadHistory();
+    loadMembers();
   }
   $("mReload").addEventListener("click", loadMembers);
   $("logout").addEventListener("click", function () { if (window.smAuth) window.smAuth.logout(); });
