@@ -9,6 +9,9 @@
     ".authcard label{display:block;font-size:13px;margin-top:12px}" +
     ".authcard input{width:100%;margin-top:4px;padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff;color:var(--ink)}" +
     ".authcard button{width:100%;margin-top:14px}.authcard button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}" +
+    ".authcard label.ck{display:flex;gap:8px;align-items:flex-start;font-size:14px;line-height:1.5}" +
+    ".authcard label.ck input{width:auto;margin:4px 0 0;flex:none}" +
+    ".authcard .note{font-size:13px;color:var(--muted);margin:10px 0 0}" +
     ".authcard .amsg{font-size:14px;color:var(--muted);margin:14px 0 0;min-height:1.5em}.authcard .amsg.err{color:var(--drowsy)}";
   document.head.append(css);
 
@@ -71,6 +74,41 @@
     q("aOut").addEventListener("click", logout);
   }
 
+  // --- 약관·개인정보 동의 (서버에 동의 기록이 없으면 먼저 받음) ---
+  var VER = window.SM_CONSENT_VERSION || "v1";
+  async function needConsent(uid) {
+    var c = await sb.from("consents").select("version").eq("user_id", uid).eq("version", VER).maybeSingle();
+    if (c.error) return false; // 동의 기록용 서버 설정이 아직 없으면 건너뜀
+    return !c.data;
+  }
+  function showConsent() {
+    card('<p class="sub">이용 전에 아래 내용에 동의해 주세요. <a href="terms.html" target="_blank" rel="noopener">약관과 개인정보 안내 전문 보기</a></p>' +
+      '<label class="ck"><input type="checkbox" id="c1"><span>[필수] 이용약관에 동의합니다.</span></label>' +
+      '<label class="ck"><input type="checkbox" id="c2"><span>[필수] 개인정보 수집·이용에 동의합니다. 공부하는 동안의 카메라 영상이 관리자에게 실시간으로 전송되고, 화면 기록·얼굴 분석 결과·학습 기록이 처리됩니다.</span></label>' +
+      '<label class="ck"><input type="checkbox" id="c3"><span>[필수] 개인정보 처리 위탁 및 국외 이전에 동의합니다.</span></label>' +
+      '<label class="ck"><input type="radio" name="age" id="a14" value="over"><span>만 14세 이상입니다.</span></label>' +
+      '<label class="ck"><input type="radio" name="age" id="u14" value="under"><span>만 14세 미만입니다.</span></label>' +
+      '<p class="note" id="u14note" hidden>만 14세 미만은 보호자가 서명한 동의서를 운영자에게 제출해야 가입이 승인됩니다.</p>' +
+      '<label class="ck"><input type="checkbox" id="c4"><span>[선택] 내 이름과 오늘 공부시간을 다른 회원에게 순위로 표시하는 데 동의합니다.</span></label>' +
+      '<label class="ck"><input type="checkbox" id="c5"><span>[선택] 학습 리포트를 보호자에게 제공하는 데 동의합니다.</span></label>' +
+      '<button type="button" id="cGo">동의하고 계속</button><button type="button" class="ghost" id="aOut">로그아웃</button>' +
+      '<p class="amsg" id="aMsg"></p>');
+    var age = function () { return q("u14").checked ? "under" : (q("a14").checked ? "over" : ""); };
+    q("a14").addEventListener("change", function () { q("u14note").hidden = true; });
+    q("u14").addEventListener("change", function () { q("u14note").hidden = false; });
+    q("aOut").addEventListener("click", logout);
+    q("cGo").addEventListener("click", function () {
+      if (!q("c1").checked || !q("c2").checked || !q("c3").checked) { msg("필수 항목에 모두 동의해야 이용할 수 있습니다.", true); return; }
+      if (!age()) { msg("만 14세 이상인지 선택해 주세요.", true); return; }
+      q("cGo").disabled = true; msg("저장 중…");
+      sb.from("consents").insert({ version: VER, under14: age() === "under", rank_ok: q("c4").checked, report_ok: q("c5").checked })
+        .then(function (r) {
+          if (r.error) { q("cGo").disabled = false; msg("저장 실패: " + r.error.message, true); return; }
+          enter();
+        }, function (e) { q("cGo").disabled = false; msg(explain(e), true); });
+    });
+  }
+
   async function enter() {
     try {
       var s = (await sb.auth.getSession()).data.session;
@@ -78,6 +116,7 @@
       var p = await sb.from("profiles").select("id,email,name,role").eq("id", s.user.id).maybeSingle();
       if (p.error) { showWait("계정 정보를 불러오지 못했습니다: " + p.error.message, true); return; }
       if (!p.data) { showWait("계정 정보가 아직 준비되지 않았습니다. 서버 설정(SQL)이 끝났는지 확인하세요.", true); return; }
+      if (await needConsent(s.user.id)) { showConsent(); return; }
       if (p.data.role === "pending") { showWait("가입이 접수되었습니다. 아직 승인 전입니다. (" + new Date().toLocaleTimeString("ko-KR", { hour12: false }) + " 확인)"); return; }
       if (window.SM_REQUIRE === "admin" && p.data.role !== "admin") { showWait("관리자 계정이 아닙니다.", true); return; }
       var st = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
