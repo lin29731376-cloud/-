@@ -61,18 +61,31 @@
   .pevents button[data-s="drowsy"] { border-color: var(--drowsy); }
   #rText { width: 100%; height: 320px; padding: 10px; border: 1px solid var(--line); border-radius: 8px;
     font: 14px/1.6 inherit; font-family: inherit; background: #fff; color: var(--ink); resize: vertical; }
+  .mrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0;
+    border-bottom: 1px solid var(--line); font-size: 14px; }
+  .mrow span { min-width: 0; overflow-wrap: anywhere; }
+  .mrow button { padding: 6px 12px; font-size: 13px; flex: none; }
   .empty { color: var(--muted); font-size: 14px; padding: 32px 8px; text-align: center; }
 </style>
 </head>
 <body>
-<main>
+<div id="auth"></div>
+<main id="app" hidden>
   <h1>관리자 화면</h1>
-  <p class="sub">같은 관리 코드를 입력한 학생들의 영상과 상태가 실시간으로 표시됩니다. 화면은 2초마다 한 장씩 이 기기에만 기록되며, 이 페이지를 닫거나 새로고침하면 지워집니다.</p>
+  <p class="sub">승인된 학생들의 영상과 상태가 실시간으로 표시됩니다. 화면은 2초마다 한 장씩 이 기기에만 기록되며, 이 페이지를 닫거나 새로고침하면 지워집니다.</p>
 
   <div class="bar">
-    <input type="text" id="topic" placeholder="관리 코드 (영문·숫자·-·_)" maxlength="64" autocomplete="off" autocapitalize="off">
+    <input type="hidden" id="topic">
     <button id="go">관리 시작</button>
-    <span class="msg" id="msg">관리 코드를 입력하고 「관리 시작」을 누르세요. 이 화면은 켜 둔 채로 두어야 합니다.</span>
+    <button id="logout" class="ghost">로그아웃</button>
+    <span class="msg" id="msg">「관리 시작」을 누르세요. 이 화면은 켜 둔 채로 두어야 합니다.</span>
+  </div>
+
+  <div class="bar" style="margin-top:12px">
+    <b style="flex:1">회원 관리</b>
+    <button id="mReload" class="ghost">새로고침</button>
+    <div id="members" style="flex-basis:100%"></div>
+    <span class="msg" id="mMsg"></span>
   </div>
 
   <div class="summary" id="summary" hidden>
@@ -80,7 +93,7 @@
     <span>자리비움 <b id="cAway">0</b></span><span>졸음 의심 <b id="cDrowsy">0</b></span><span>휴식 <b id="cBreak">0</b></span>
   </div>
   <div class="grid" id="grid"></div>
-  <p class="empty" id="empty" hidden>아직 접속한 학생이 없습니다. 학생 화면에서 같은 관리 코드를 입력하고 「카메라 시작」을 누르면 여기에 나타납니다.</p>
+  <p class="empty" id="empty" hidden>아직 접속한 학생이 없습니다. 학생이 로그인해서 「카메라 시작」을 누르면 여기에 나타납니다.</p>
 </main>
 
 <div class="modal" id="player" hidden>
@@ -107,6 +120,10 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>window.SM_REQUIRE = "admin";</script>
+<script src="auth.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 (function () {
@@ -115,7 +132,6 @@
   var tiles = new Map(); // 학생 연결 ID -> 타일
   var peer = null, audio = null, wakeLock = null;
 
-  try { $("topic").value = localStorage.getItem("sm_topic") || ""; } catch (e) {}
   function say(text, err) { $("msg").textContent = text; $("msg").classList.toggle("err", !!err); }
   function fmt(ms) {
     var s = Math.floor((ms || 0) / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
@@ -311,14 +327,49 @@
     try { navigator.clipboard.writeText($("rText").value).then(done, manual); } catch (e) { manual(); }
   });
 
+  // --- 로그인 · 회원 관리 ---
+  var ROLE_TEXT = { pending: "승인 대기", student: "학생", admin: "관리자" };
+  function loadMembers() {
+    $("mMsg").textContent = "불러오는 중…";
+    window.sb.from("profiles").select("id,email,name,role").order("created_at").then(function (r) {
+      var box = $("members"); box.textContent = "";
+      if (r.error) { $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + r.error.message; return; }
+      $("mMsg").textContent = r.data.length ? "" : "아직 가입한 회원이 없습니다.";
+      r.data.forEach(function (p) {
+        var row = document.createElement("div"); row.className = "mrow";
+        var who = document.createElement("span");
+        who.textContent = (p.name || "(이름 없음)") + " · " + (p.email || "") + " · " + (ROLE_TEXT[p.role] || p.role);
+        row.append(who);
+        if (p.role !== "admin") {
+          var b = document.createElement("button"); b.type = "button";
+          var to = p.role === "pending" ? "student" : "pending";
+          b.textContent = p.role === "pending" ? "승인" : "이용 정지";
+          if (p.role !== "pending") b.className = "ghost";
+          b.addEventListener("click", function () {
+            b.disabled = true;
+            window.sb.rpc("set_role", { target: p.id, new_role: to }).then(function (x) {
+              if (x.error) { $("mMsg").textContent = "변경 실패: " + x.error.message; b.disabled = false; return; }
+              loadMembers();
+            });
+          });
+          row.append(b);
+        }
+        box.append(row);
+      });
+    }, function (e) { $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + e; });
+  }
+  function onReady() { $("topic").value = window.smAuth.settings.room_code || ""; loadMembers(); }
+  $("mReload").addEventListener("click", loadMembers);
+  $("logout").addEventListener("click", function () { if (window.smAuth) window.smAuth.logout(); });
+  if (window.smAuth) onReady(); else document.addEventListener("sm-ready", onReady, { once: true });
+
   $("go").addEventListener("click", function () {
     var topic = $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
     $("topic").value = topic;
-    if (!topic) { say("관리 코드를 입력하세요.", true); return; }
+    if (!topic) { say("계정 설정을 불러오지 못했습니다. 새로고침하세요.", true); return; }
     if (!window.Peer) { say("실시간 연결 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침하세요.", true); return; }
-    try { localStorage.setItem("sm_topic", topic); } catch (e) {}
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
-    $("go").disabled = true; $("topic").disabled = true; say("연결 중…");
+    $("go").disabled = true; say("연결 중…");
 
     peer = new window.Peer("dsm-" + topic + "-admin");
     peer.on("open", function () {
@@ -341,8 +392,8 @@
     peer.on("error", function (e) {
       var type = e && e.type ? e.type : String(e);
       if (type === "unavailable-id") {
-        say("이 관리 코드로 이미 다른 관리자 화면이 열려 있습니다. 그 화면을 닫고 새로고침하세요.", true);
-        $("go").disabled = false; $("topic").disabled = false;
+        say("이미 다른 곳에서 관리자 화면이 열려 있습니다. 그 화면을 닫고 새로고침하세요.", true);
+        $("go").disabled = false;
       } else say("연결 오류: " + type, true);
     });
   });

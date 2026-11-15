@@ -72,9 +72,10 @@
 </style>
 </head>
 <body>
-<main>
+<div id="auth"></div>
+<main id="app" hidden>
   <h1>독서실 모니터 프로토타입</h1>
-  <p class="sub">웹캠으로 자리비움과 졸음을 감지합니다. 영상은 이 기기 안에서만 분석되고 어디로도 전송되지 않습니다.</p>
+  <p class="sub">캠으로 자리비움과 졸음을 감지합니다. 영상과 상태는 관리자 화면에만 전송됩니다.</p>
 
   <div class="grid">
     <section class="panel">
@@ -121,13 +122,11 @@
       </section>
 
       <section class="panel">
-        <h2>관리자 알림</h2>
-        <label>학생 이름
-          <input type="text" id="who" placeholder="예: 홍길동" maxlength="20" autocomplete="off"></label>
-        <label>관리 코드 (관리자 화면 코드 · ntfy 앱 구독 이름과 동일)
-          <input type="text" id="topic" placeholder="영문·숫자·-·_ 만 가능" maxlength="64" autocomplete="off" autocapitalize="off"></label>
+        <h2>내 계정</h2>
+        <p style="margin:0"><b id="meName"></b> <span class="msg" id="meEmail"></span></p>
+        <input type="hidden" id="who"><input type="hidden" id="topic"><input type="hidden" id="room">
         <div class="row">
-          <button id="testNotify" class="ghost">테스트 알림 보내기</button>
+          <button id="logout" class="ghost">로그아웃</button>
           <span class="msg" id="nMsg"></span>
         </div>
         <p class="msg" id="lMsg" style="margin:10px 0 0"></p>
@@ -145,6 +144,9 @@
 </main>
 <div class="wake" id="wake" hidden><div><p>관리자가 호출했습니다</p><button id="wakeOk">확인</button></div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="module">
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
@@ -201,6 +203,7 @@ function setState(next) {
   const prev = state; state = next;
   badge.textContent = LABEL[next]; badge.dataset.s = next; stage.dataset.s = next;
   if (next === "idle") return;
+  saveEvent(next);
   if (next === "study") addLog(prev === "idle" ? "공부 시작" : `복귀 (${LABEL[prev]} 해제)`);
   else if (next === "break") addLog(`휴식 시작 (${breakReason})`);
   else { addLog(`${LABEL[next]} 감지`); beep(); notify(`${LABEL[next]} 감지`, true); }
@@ -211,13 +214,6 @@ const store = {
   get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 저장 안 돼도 동작 */ } },
 };
-for (const id of ["who", "topic"]) {
-  $(id).value = store.get("sm_" + id);
-  $(id).addEventListener("change", () => {
-    if (id === "topic") $(id).value = $(id).value.replace(/[^A-Za-z0-9_-]/g, "");
-    store.set("sm_" + id, $(id).value.trim());
-  });
-}
 function nSay(text, err) { $("nMsg").textContent = text; $("nMsg").classList.toggle("err", !!err); }
 async function notify(what, urgent) {
   const topic = $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
@@ -236,16 +232,12 @@ async function notify(what, urgent) {
     nSay("알림 전송 실패: " + (e && e.message ? e.message : e), true); return false;
   }
 }
-$("testNotify").addEventListener("click", () => {
-  if (!$("topic").value.trim()) { nSay("알림 채널 이름을 먼저 입력하세요.", true); return; }
-  nSay("보내는 중…"); notify("테스트 알림", false);
-});
 
 // --- 관리자 화면 실시간 연결 (영상 + 상태, PeerJS) ---
 let peer = null, link = null, call = null, linkTimer = null, lastTry = 0;
 const lSay = (t) => { $("lMsg").textContent = t; };
 const getTopic = () => $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
-const adminId = () => "dsm-" + getTopic() + "-admin";
+const adminId = () => "dsm-" + $("room").value + "-admin";
 function sendStatus() {
   if (!link || !link.open) return;
   try { link.send({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "" }); } catch (e) { /* 다음 주기에 재시도 */ }
@@ -265,7 +257,7 @@ function tryLink() {
   c.on("close", () => { if (link === c) lSay("관리자 화면과 연결이 끊겼습니다. 다시 시도 중…"); });
 }
 function startLink() {
-  if (!getTopic()) { lSay("관리 코드를 입력하고 다시 시작하면 관리자 화면에 영상과 상태가 전송됩니다."); return; }
+  if (!$("room").value) { lSay("계정 설정을 불러오지 못해 관리자 화면에 연결할 수 없습니다."); return; }
   if (!window.Peer) { lSay("실시간 연결 모듈을 불러오지 못했습니다."); return; }
   lSay("관리자 화면 연결 중…");
   peer = new window.Peer();
@@ -331,6 +323,45 @@ function wakeDone(ack) {
   if (ack) { addLog("관리자 호출 확인"); try { if (link && link.open) link.send({ ack: "wake" }); } catch (e) {} }
 }
 $("wakeOk").addEventListener("click", () => wakeDone(true));
+
+// --- 로그인 계정 · 서버 저장 (Supabase) ---
+const dayKey = (() => { const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; })();
+let lastSaved = "";
+function saveTotals() { // 오늘 누적 시간을 서버에 저장 (30초마다, 중지할 때)
+  if (!window.smAuth) return;
+  const row = { user_id: window.smAuth.profile.id, day: dayKey,
+    study_ms: Math.round(total.study), away_ms: Math.round(total.away),
+    drowsy_ms: Math.round(total.drowsy), break_ms: Math.round(total.break) };
+  const sig = JSON.stringify(row);
+  if (sig === lastSaved) return;
+  lastSaved = sig;
+  window.sb.from("study_days").upsert(row, { onConflict: "user_id,day" })
+    .then(({ error }) => { if (error) { lastSaved = ""; console.warn("저장 실패", error); } }, () => { lastSaved = ""; });
+}
+function saveEvent(kind) { // 상태 변화 기록
+  if (!window.smAuth) return;
+  window.sb.from("study_events").insert({ kind })
+    .then(({ error }) => { if (error) console.warn("기록 실패", error); }, () => {});
+}
+async function initAccount() {
+  const { profile, settings, logout } = window.smAuth;
+  $("who").value = profile.name || profile.email || "이름 미입력";
+  $("topic").value = settings.ntfy_topic || ""; $("room").value = settings.room_code || "";
+  $("meName").textContent = $("who").value; $("meEmail").textContent = profile.email || "";
+  $("logout").addEventListener("click", () => { saveTotals(); logout(); });
+  try { // 오늘 이미 쌓인 시간이 있으면 이어서 누적
+    const { data } = await window.sb.from("study_days").select("study_ms,away_ms,drowsy_ms,break_ms")
+      .eq("user_id", profile.id).eq("day", dayKey).maybeSingle();
+    if (data) {
+      total.study += Number(data.study_ms) || 0; total.away += Number(data.away_ms) || 0;
+      total.drowsy += Number(data.drowsy_ms) || 0; total.break += Number(data.break_ms) || 0;
+      renderTotals();
+    }
+  } catch (e) { console.warn("오늘 기록을 불러오지 못함", e); }
+  setInterval(saveTotals, 30000);
+}
+if (window.smAuth) initAccount(); else document.addEventListener("sm-ready", initAccount, { once: true });
 
 // --- 감지 루프 ---
 function tick() {
@@ -461,7 +492,7 @@ $("start").addEventListener("click", async () => {
 });
 
 function stopAll() {
-  clearInterval(timer); timer = null; stopLink();
+  clearInterval(timer); timer = null; stopLink(); saveTotals();
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   video.srcObject = null;
