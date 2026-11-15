@@ -39,6 +39,9 @@
   .tile[data-s="away"] .badge { background: var(--away); }
   .tile[data-s="drowsy"] .badge { background: var(--drowsy); }
   .tile[data-s="break"] .badge { background: #3b6ea5; }
+  .tile[data-s="distract"] { border-color: #7a4fa3; }
+  .tile[data-s="distract"] .badge { background: #7a4fa3; }
+  .pevents button[data-s="distract"], .pevents button[data-s="multi"] { border-color: #7a4fa3; }
   .meta button + button { margin-left: 6px; }
   .meta { padding: 10px 12px; }
   .meta b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -139,7 +142,7 @@
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", lost: "응답 없음", off: "연결 끊김", break: "휴식 중" };
+  var LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", lost: "응답 없음", off: "연결 끊김", break: "휴식 중", distract: "시선 이탈", multi: "다른 사람 감지" };
   var tiles = new Map(); // 학생 연결 ID -> 타일
   var running = false, audio = null, wakeLock = null;
 
@@ -169,7 +172,7 @@
     if (t.state === s) return;
     var prev = t.state; t.state = s;
     t.el.dataset.s = s; t.badge.textContent = LABEL[s] || s;
-    if (prev && (s === "away" || s === "drowsy")) beep();
+    if (prev && (s === "away" || s === "drowsy" || s === "distract")) beep();
     if (prev && prev !== "idle" && s !== "idle") { t.events.push({ t: Date.now(), s: s }); if (cur === t) renderEvents(); }
     summarize();
   }
@@ -226,6 +229,9 @@
     t.times.textContent = "공부 " + fmt(tot.study) + " · 자리비움 " + fmt(tot.away) + " · 졸음 " + fmt(tot.drowsy) + " · 휴식 " + fmt(tot.break);
     setTileState(t, LABEL[d.state] ? d.state : "idle");
     if (d.state === "break" && d.reason) t.badge.textContent = "휴식 중 · " + String(d.reason).slice(0, 10);
+    if (d.multi && !t.multi) { t.events.push({ t: Date.now(), s: "multi" }); beep(); if (cur === t) renderEvents(); }
+    t.multi = !!d.multi;
+    if (t.multi) t.times.textContent = "⚠ 다른 사람 감지 · " + t.times.textContent;
   }
 
   setInterval(function () { // 학생 쪽 화면이 꺼지거나 페이지를 닫으면 '응답 없음'
@@ -272,7 +278,7 @@
   function stopPlay() { clearInterval(playTimer); playTimer = null; $("pPlay").textContent = "재생 (8배속)"; }
   function renderEvents() {
     var box = $("pEvents"); box.textContent = "";
-    var list = cur.events.filter(function (e) { return e.s === "away" || e.s === "drowsy" || e.s === "lost"; });
+    var list = cur.events.filter(function (e) { return e.s === "away" || e.s === "drowsy" || e.s === "lost" || e.s === "distract" || e.s === "multi"; });
     if (!list.length) { box.textContent = "아직 알림이 없습니다."; return; }
     list.forEach(function (e) {
       var b = document.createElement("button"); b.type = "button"; b.dataset.s = e.s;
@@ -307,9 +313,9 @@
   });
 
   // --- 리포트 ---
-  var EVENT_TEXT = { study: "공부 재개", away: "자리비움", drowsy: "졸음 의심", break: "휴식 시작", lost: "응답 없음", off: "연결 끊김" };
+  var EVENT_TEXT = { study: "공부 재개", away: "자리비움", drowsy: "졸음 의심", break: "휴식 시작", lost: "응답 없음", off: "연결 끊김", distract: "시선 이탈", multi: "다른 사람 감지" };
   function openReport(t) {
-    var n = { away: 0, drowsy: 0, break: 0, lost: 0 };
+    var n = { away: 0, drowsy: 0, break: 0, lost: 0, distract: 0, multi: 0 };
     t.events.forEach(function (e) { if (n[e.s] !== undefined) n[e.s]++; });
     var tot = t.tot || {}, now = Date.now();
     var lines = [
@@ -319,6 +325,7 @@
       "순공부시간 " + fmt(tot.study),
       "자리비움 " + n.away + "회 · " + fmt(tot.away),
       "졸음 의심 " + n.drowsy + "회 · " + fmt(tot.drowsy),
+      "시선 이탈 " + n.distract + "회" + (n.multi ? " · 다른 사람 감지 " + n.multi + "회" : ""),
       "휴식 " + n.break + "회 · " + fmt(tot.break),
       "관리자 호출 " + t.wakes + "회",
     ];
@@ -452,13 +459,14 @@
       .gte("at", from.toISOString()).lt("at", to.toISOString()).order("at").limit(500).then(function (r) {
         if (r.error) { $("hMsg").textContent = "상세 기록을 불러오지 못했습니다: " + r.error.message; return; }
         $("hMsg").textContent = "";
-        var n = { away: 0, drowsy: 0, break: 0 };
+        var n = { away: 0, drowsy: 0, break: 0, distract: 0, multi: 0 };
         r.data.forEach(function (e) { if (n[e.kind] !== undefined) n[e.kind]++; });
         var lines = [
           "[독서실 리포트] " + name, day, "",
           "순공부시간 " + fmt(d.study_ms),
           "자리비움 " + n.away + "회 · " + fmt(d.away_ms),
           "졸음 의심 " + n.drowsy + "회 · " + fmt(d.drowsy_ms),
+          "시선 이탈 " + n.distract + "회" + (n.multi ? " · 다른 사람 감지 " + n.multi + "회" : ""),
           "휴식 " + n.break + "회 · " + fmt(d.break_ms),
           "", "시간대별 기록",
         ];
