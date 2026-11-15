@@ -63,6 +63,9 @@
     font: 14px/1.6 inherit; font-family: inherit; background: #fff; color: var(--ink); resize: vertical; }
   input[type=date] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit;
     background: #fff; color: var(--ink); }
+  .cfg { flex: 1 1 220px; font-size: 13px; }
+  .cfg output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cfg input { width: 100%; margin-top: 4px; accent-color: var(--ink); }
   .mrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0;
     border-bottom: 1px solid var(--line); font-size: 14px; }
   .mrow span { min-width: 0; overflow-wrap: anywhere; }
@@ -89,6 +92,18 @@
     <button id="mReload" class="ghost">새로고침</button>
     <div id="members" style="flex-basis:100%"></div>
     <span class="msg" id="mMsg"></span>
+  </div>
+
+  <div class="bar" style="margin-top:12px">
+    <b style="flex-basis:100%">감지 기준 — 모든 학생에게 적용</b>
+    <label class="cfg">자리비움: 얼굴이 안 보인 시간 <output id="oAway"></output>
+      <input type="range" id="rAway" min="3" max="300" step="1" value="30"></label>
+    <label class="cfg">졸음: 눈을 감고 있는 시간 <output id="oDrowsy"></output>
+      <input type="range" id="rDrowsy" min="2" max="60" step="1" value="8"></label>
+    <label class="cfg">눈 감김 판정 기준 (낮을수록 민감) <output id="oThr"></output>
+      <input type="range" id="rThr" min="0.3" max="0.9" step="0.05" value="0.6"></label>
+    <button id="cSave">저장</button>
+    <span class="msg" id="cMsg"></span>
   </div>
 
   <div class="bar" style="margin-top:12px">
@@ -473,7 +488,31 @@
   $("hLoad").addEventListener("click", loadHistory);
   $("hDay").addEventListener("change", loadHistory);
 
+  // --- 감지 기준 (서버에 저장, 접속 중인 학생에게는 즉시 전달) ---
+  function showCfg() {
+    $("oAway").textContent = $("rAway").value + "초";
+    $("oDrowsy").textContent = $("rDrowsy").value + "초";
+    $("oThr").textContent = Number($("rThr").value).toFixed(2);
+  }
+  ["rAway", "rDrowsy", "rThr"].forEach(function (id) { $(id).addEventListener("input", showCfg); });
+  $("cSave").addEventListener("click", function () {
+    var cfg = { away: Number($("rAway").value), drowsy: Number($("rDrowsy").value), thr: Number($("rThr").value) };
+    $("cSave").disabled = true; $("cMsg").textContent = "저장 중…";
+    window.sb.rpc("set_thresholds", cfg).then(function (r) {
+      $("cSave").disabled = false;
+      if (r.error) { $("cMsg").textContent = "저장 실패: " + r.error.message + " (서버 설정 SQL을 실행했는지 확인하세요)"; return; }
+      var sent = 0;
+      tiles.forEach(function (t) { try { if (t.send && t.send({ cmd: "cfg", away: cfg.away, drowsy: cfg.drowsy, thr: cfg.thr })) sent++; } catch (e) {} });
+      $("cMsg").textContent = "저장했습니다. 접속 중인 학생 " + sent + "명에게 바로 적용했고, 나머지는 다음 접속 때 적용됩니다.";
+    }, function (e) { $("cSave").disabled = false; $("cMsg").textContent = "저장 실패: " + e; });
+  });
+
   function onReady() {
+    var st = window.smAuth.settings;
+    if (Number(st.away_sec) > 0) $("rAway").value = st.away_sec;
+    if (Number(st.drowsy_sec) > 0) $("rDrowsy").value = st.drowsy_sec;
+    if (Number(st.eye_thr) > 0) $("rThr").value = st.eye_thr;
+    showCfg();
     $("topic").value = window.smAuth.settings.room_code || "";
     var now = new Date(), p2 = function (x) { return String(x).padStart(2, "0"); };
     $("hDay").value = now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate());

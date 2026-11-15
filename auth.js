@@ -80,7 +80,7 @@
       if (!p.data) { showWait("계정 정보가 아직 준비되지 않았습니다. 서버 설정(SQL)이 끝났는지 확인하세요.", true); return; }
       if (p.data.role === "pending") { showWait("가입이 접수되었습니다. 아직 승인 전입니다. (" + new Date().toLocaleTimeString("ko-KR", { hour12: false }) + " 확인)"); return; }
       if (window.SM_REQUIRE === "admin" && p.data.role !== "admin") { showWait("관리자 계정이 아닙니다.", true); return; }
-      var st = await sb.from("settings").select("room_code,ntfy_topic").eq("id", 1).maybeSingle();
+      var st = await sb.from("settings").select("*").eq("id", 1).maybeSingle();
       if (st.error || !st.data) { showWait("설정을 불러오지 못했습니다" + (st.error ? ": " + st.error.message : "."), true); return; }
       window.smAuth = { profile: p.data, settings: st.data, logout: logout };
       box.hidden = true; app.hidden = false;
