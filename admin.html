@@ -66,7 +66,16 @@
   .cfg { flex: 1 1 220px; font-size: 13px; }
   .cfg output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .cfg input { width: 100%; margin-top: 4px; accent-color: var(--ink); }
-  .mrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0;
+  .days { display: flex; gap: 6px; flex-wrap: wrap; }
+  .days label { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border: 1px solid var(--line);
+    border-radius: 8px; font-size: 14px; background: #fff; }
+  input[type=time] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit;
+    background: #fff; color: var(--ink); }
+  .mrow b[data-a="ok"] { color: var(--study); }
+  .mrow b[data-a="late"] { color: var(--away); }
+  .mrow b[data-a="absent"] { color: var(--drowsy); }
+  .mrow b[data-a="wait"] { color: var(--muted); font-weight: 400; }
+  .mrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; flex-wrap: wrap;
     border-bottom: 1px solid var(--line); font-size: 14px; }
   .mrow span { min-width: 0; overflow-wrap: anywhere; flex: 1; }
   .mrow button { padding: 6px 12px; font-size: 13px; flex: none; }
@@ -85,6 +94,13 @@
     <button id="logout" class="ghost">로그아웃</button>
     <span class="msg" id="msg">「관리 시작」을 누르세요. 이 화면은 켜 둔 채로 두어야 합니다.</span>
     <span class="msg" id="lkMsg"></span>
+  </div>
+
+  <div class="bar" style="margin-top:12px">
+    <b style="flex:1">오늘 출석</b>
+    <button id="attReload" class="ghost">새로고침</button>
+    <div id="att" style="flex-basis:100%"></div>
+    <span class="msg" id="attMsg"></span>
   </div>
 
   <div class="bar" style="margin-top:12px">
@@ -135,6 +151,22 @@
     </div>
     <p class="ptitle">알림이 뜬 시각 — 누르면 그 20초 전으로 이동합니다</p>
     <div class="pevents" id="pEvents"></div>
+  </div>
+</div>
+
+<div class="modal" id="sched" hidden>
+  <div class="box">
+    <div class="phead"><b id="sName"></b><button id="sClose" class="ghost">닫기</button></div>
+    <p class="ptitle" style="margin-top:0">출석하는 요일</p>
+    <div class="days" id="sDays"></div>
+    <div class="prow" style="margin-top:14px">
+      <label>시작 <input type="time" id="sStart" value="09:00"></label>
+      <label>종료 <input type="time" id="sEnd" value="13:00"></label>
+    </div>
+    <div class="prow" style="margin-top:14px">
+      <button id="sSave">저장</button><button id="sDel" class="ghost">출석 시간 삭제</button>
+      <span class="msg" id="sMsg"></span>
+    </div>
   </div>
 </div>
 
@@ -428,6 +460,7 @@
       $("mMsg").textContent = r.data.length ? "" : "아직 가입한 회원이 없습니다.";
       r.data.forEach(function (m) { names[m.id] = m.name || m.email || "(이름 없음)"; });
       loadHistory(); // 이름을 알고 난 뒤에 기록 표시
+      renderAtt();
       r.data.forEach(function (p) {
         names[p.id] = p.name || p.email || "(이름 없음)";
         var row = document.createElement("div"); row.className = "mrow";
@@ -462,6 +495,9 @@
           });
           row.append(pb);
         }
+        var sb2 = document.createElement("button"); sb2.type = "button"; sb2.className = "ghost"; sb2.textContent = "출석 시간";
+        sb2.addEventListener("click", function () { openSched(p.id, p.name || p.email || "회원"); });
+        row.append(sb2);
         box.append(row);
       });
     }, function (e) { $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + e; });
@@ -516,6 +552,101 @@
   $("hLoad").addEventListener("click", loadHistory);
   $("hDay").addEventListener("change", loadHistory);
 
+  // --- 출석 체크: 회원별 출석 시간과 오늘 첫 접속 시각을 비교 (이 화면이 열려 있는 동안 동작) ---
+  var DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"], GRACE = 10 * 60000;
+  var scheds = null, firstAt = {}, schedUid = null; // scheds: 회원 id → 출석 시간 (서버 설정 전이면 null)
+  DAY_NAMES.forEach(function (n, i) {
+    var l = document.createElement("label"), c = document.createElement("input");
+    c.type = "checkbox"; c.value = i; l.append(c, document.createTextNode(n)); $("sDays").append(l);
+  });
+  function hm(t) { return String(t).slice(0, 5); }
+  function todayAt(t) { var x = String(t).split(":"), d = new Date(); d.setHours(Number(x[0]), Number(x[1]), 0, 0); return d.getTime(); }
+  function hhmm(ms) { return new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }); }
+  function loadSched() {
+    window.sb.from("schedules").select("user_id,days,start_time,end_time").then(function (r) {
+      if (r.error || !r.data) { scheds = null; renderAtt(); return; }
+      scheds = {}; r.data.forEach(function (x) { scheds[x.user_id] = x; });
+      loadArrivals();
+    }, function () { scheds = null; renderAtt(); });
+  }
+  function loadArrivals() { // 오늘 각 회원의 첫 접속 시각
+    if (!scheds) return;
+    var d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    window.sb.from("study_events").select("user_id,at").gte("at", d0.toISOString()).order("at").limit(3000).then(function (r) {
+      if (!r.error && r.data) {
+        firstAt = {};
+        r.data.forEach(function (e) { if (!firstAt[e.user_id]) firstAt[e.user_id] = new Date(e.at).getTime(); });
+      }
+      renderAtt();
+    }, function () { renderAtt(); });
+  }
+  function alertAbsent(uid, name, start) { // 회원별로 하루 한 번만 알림
+    var d = new Date(), key = "sm_abs_" + d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate() + "_" + uid;
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch (e) {}
+    beep();
+    var topic = (window.smAuth.settings.ntfy_topic || "").replace(/[^A-Za-z0-9_-]/g, "");
+    if (!topic) return;
+    fetch("https://ntfy.sh/", { method: "POST", body: JSON.stringify({
+      topic: topic, title: name + " — 미출석", message: "예정 " + hm(start) + " · 10분이 지나도록 접속하지 않았습니다",
+      priority: 4, tags: ["warning"] }) }).catch(function () {});
+  }
+  function renderAtt() {
+    var box = $("att"); box.textContent = "";
+    if (!scheds) { $("attMsg").textContent = "출석 체크를 쓰려면 서버 설정(SQL)을 실행하세요."; return; }
+    var dow = new Date().getDay(), now = Date.now(), rows = [];
+    Object.keys(scheds).forEach(function (uid) {
+      var sc = scheds[uid];
+      if ((sc.days || []).indexOf(dow) < 0) return;
+      rows.push({ uid: uid, sc: sc, start: todayAt(sc.start_time), end: todayAt(sc.end_time) });
+    });
+    rows.sort(function (a, b) { return a.start - b.start; });
+    $("attMsg").textContent = rows.length ? "" : "오늘 출석 예정인 회원이 없습니다. 회원 관리의 「출석 시간」에서 정하세요.";
+    rows.forEach(function (r) {
+      var name = names[r.uid] || "(알 수 없는 회원)", f = firstAt[r.uid], text, kind;
+      if (f) {
+        if (f <= r.start + GRACE) { text = "출석 (" + hhmm(f) + ")"; kind = "ok"; }
+        else { text = "지각 (" + hhmm(f) + ", " + Math.round((f - r.start) / 60000) + "분 늦음)"; kind = "late"; }
+      } else if (now < r.start) { text = "예정"; kind = "wait"; }
+      else if (now < r.start + GRACE) { text = "아직 접속 전"; kind = "wait"; }
+      else if (now < r.end) { text = "미출석"; kind = "absent"; alertAbsent(r.uid, name, r.sc.start_time); }
+      else { text = "결석"; kind = "absent"; }
+      var row = document.createElement("div"); row.className = "mrow";
+      var a = document.createElement("span"), b = document.createElement("b");
+      a.textContent = name + " · " + hm(r.sc.start_time) + "~" + hm(r.sc.end_time);
+      b.textContent = text; b.dataset.a = kind;
+      row.append(a, b); box.append(row);
+    });
+  }
+  function openSched(uid, name) {
+    schedUid = uid; $("sName").textContent = name + " — 출석 시간"; $("sMsg").textContent = "";
+    var sc = scheds && scheds[uid];
+    $("sDays").querySelectorAll("input").forEach(function (c) { c.checked = sc ? (sc.days || []).indexOf(Number(c.value)) >= 0 : (Number(c.value) >= 1 && Number(c.value) <= 5); });
+    $("sStart").value = sc ? hm(sc.start_time) : "09:00"; $("sEnd").value = sc ? hm(sc.end_time) : "13:00";
+    $("sched").hidden = false;
+  }
+  $("sClose").addEventListener("click", function () { $("sched").hidden = true; });
+  $("sSave").addEventListener("click", function () {
+    var days = []; $("sDays").querySelectorAll("input").forEach(function (c) { if (c.checked) days.push(Number(c.value)); });
+    var st = $("sStart").value, en = $("sEnd").value;
+    if (!days.length) { $("sMsg").textContent = "요일을 하나 이상 고르세요."; return; }
+    if (!st || !en || st >= en) { $("sMsg").textContent = "종료 시간은 시작 시간보다 늦어야 합니다."; return; }
+    $("sMsg").textContent = "저장 중…";
+    window.sb.from("schedules").upsert({ user_id: schedUid, days: days, start_time: st, end_time: en }, { onConflict: "user_id" }).then(function (r) {
+      if (r.error) { $("sMsg").textContent = "저장 실패: " + r.error.message + " (서버 설정 SQL을 실행했는지 확인하세요)"; return; }
+      $("sched").hidden = true; loadSched();
+    }, function (e) { $("sMsg").textContent = "저장 실패: " + e; });
+  });
+  $("sDel").addEventListener("click", function () {
+    $("sMsg").textContent = "삭제 중…";
+    window.sb.from("schedules").delete().eq("user_id", schedUid).then(function (r) {
+      if (r.error) { $("sMsg").textContent = "삭제 실패: " + r.error.message; return; }
+      $("sched").hidden = true; loadSched();
+    }, function (e) { $("sMsg").textContent = "삭제 실패: " + e; });
+  });
+  $("attReload").addEventListener("click", loadSched);
+  setInterval(loadArrivals, 60000);
+  setInterval(renderAtt, 30000);
+
   // --- 감지 기준 (서버에 저장, 접속 중인 학생에게는 즉시 전달) ---
   function showCfg() {
     $("oAway").textContent = $("rAway").value + "초";
@@ -541,6 +672,7 @@
     if (Number(st.drowsy_sec) > 0) $("rDrowsy").value = st.drowsy_sec;
     if (Number(st.eye_thr) > 0) $("rThr").value = st.eye_thr;
     showCfg();
+    loadSched();
     $("topic").value = window.smAuth.settings.room_code || "";
     var now = new Date(), p2 = function (x) { return String(x).padStart(2, "0"); };
     $("hDay").value = now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate());
