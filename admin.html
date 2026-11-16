@@ -67,6 +67,9 @@
   .cfg output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .cfg input { width: 100%; margin-top: 4px; accent-color: var(--ink); }
   .seg[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .stnav { flex-basis: 100%; display: flex; align-items: center; gap: 10px; }
+  .stnav span { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 150px; text-align: center; }
+  .stnav button { padding: 8px 14px; }
   .sth { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
   .hrow { display: grid; grid-template-columns: minmax(64px, 120px) 1fr auto; gap: 10px; align-items: center; width: 100%;
     padding: 8px 4px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
@@ -164,6 +167,11 @@
     <b style="flex:1">통계</b>
     <button id="st7" class="ghost seg" aria-pressed="true">최근 7일</button>
     <button id="st30" class="ghost seg" aria-pressed="false">최근 30일</button>
+    <div class="stnav">
+      <button id="stPrev" class="ghost">‹ 이전</button>
+      <span id="stRange"></span>
+      <button id="stNext" class="ghost" disabled>다음 ›</button>
+    </div>
     <div id="stats" style="flex-basis:100%"></div>
     <span class="msg" id="stMsg"></span>
   </div>
@@ -594,12 +602,15 @@
   $("hDay").addEventListener("change", loadHistory);
 
   // --- 통계: 최근 7일 / 30일의 날짜별 공부시간 (서버 기록 기준) ---
-  var stDays = 7, stData = null, stUser = null, WD = ["일", "월", "화", "수", "목", "금", "토"];
+  var stOff = 0, stDays = 7, stData = null, stUser = null, WD = ["일", "월", "화", "수", "목", "금", "토"];
   function keyOf(d) { var p2 = function (x) { return String(x).padStart(2, "0"); }; return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()); }
   function mk(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
   function loadStats() {
     var days = [], t = new Date(); t.setHours(12, 0, 0, 0);
+    t = new Date(t.getTime() - stOff * stDays * 86400000); // stOff: 몇 기간 전을 보는지 (0 = 오늘까지)
     for (var i = stDays - 1; i >= 0; i--) days.push(new Date(t.getTime() - i * 86400000));
+    $("stRange").textContent = rangeText(days) + (stOff ? "" : " (오늘까지)");
+    $("stNext").disabled = stOff === 0;
     $("stMsg").textContent = "불러오는 중…";
     window.sb.from("study_days").select("user_id,day,study_ms,away_ms,drowsy_ms,break_ms")
       .gte("day", keyOf(days[0])).lte("day", keyOf(days[days.length - 1])).limit(1000).then(function (r) {
@@ -636,7 +647,7 @@
     var mine = by[stUser], vals = days.map(function (d) { return mine[keyOf(d)] || null; });
     var studied = vals.filter(function (v) { return v && Number(v.study_ms) > 0; }).length;
     var total = sum(stUser, "study_ms");
-    box.append(mk("p", "sth", (names[stUser] || "회원") + " — 최근 " + stDays + "일"));
+    box.append(mk("p", "sth", (names[stUser] || "회원") + " — " + (stOff ? rangeText(days) : "최근 " + stDays + "일")));
     var tiles = mk("div", "tiles");
     [["공부시간 합계", fmt(total)], ["공부한 날", studied + " / " + stDays + "일"],
      ["하루 평균 (공부한 날 기준)", studied ? fmt(total / studied) : "—"],
@@ -684,7 +695,17 @@
     });
     det.append(tb); box.append(det);
   }
+  function rangeText(days) {
+    var a = days[0], b = days[days.length - 1];
+    return (a.getMonth() + 1) + "월 " + a.getDate() + "일 ~ " + (b.getMonth() + 1) + "월 " + b.getDate() + "일";
+  }
+  function shiftRange(dir) { // dir: 1 = 이전 기간, -1 = 다음 기간
+    stOff = Math.max(0, stOff + dir); loadStats();
+  }
+  $("stPrev").addEventListener("click", function () { shiftRange(1); });
+  $("stNext").addEventListener("click", function () { shiftRange(-1); });
   function setRange(n) {
+    stOff = 0;
     stDays = n; $("st7").setAttribute("aria-pressed", String(n === 7)); $("st30").setAttribute("aria-pressed", String(n === 30)); loadStats();
   }
   $("st7").addEventListener("click", function () { setRange(7); });
