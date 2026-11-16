@@ -172,14 +172,14 @@
   </div>
 
   <div class="bar" style="margin-top:12px">
-    <b style="flex:1">기록 조회</b>
+    <b style="flex:1">하루 기록</b>
     <input type="date" id="hDay" aria-label="조회할 날짜">
     <button id="hLoad" class="ghost">조회</button>
     <div id="hist" style="flex-basis:100%"></div>
     <span class="msg" id="hMsg"></span>
   </div>
 
-  <div id="statsHome"></div>
+  <div id="statsHome" hidden>
   <div class="bar" id="statsPanel" style="margin-top:12px">
     <b style="flex:1">통계</b>
     <button id="st7" class="ghost seg" aria-pressed="true">최근 7일</button>
@@ -188,10 +188,11 @@
       <button id="stPrev" class="ghost">‹ 이전</button>
       <span id="stRange"></span>
       <button id="stNext" class="ghost" disabled>다음 ›</button>
-      <select id="stWho" aria-label="볼 사람 선택"></select>
+      <select id="stWho" aria-label="볼 사람 선택" hidden></select>
     </div>
     <div id="stats" style="flex-basis:100%"></div>
     <span class="msg" id="stMsg"></span>
+  </div>
   </div>
 
   <div class="summary" id="summary" hidden>
@@ -611,14 +612,14 @@
   function openStu(id) {
     stuId = id; $("uMsg").textContent = ""; fillStu();
     $("uStats").append($("statsPanel")); // 통계 칸을 이 창 안으로 옮겨 이 학생 것만 표시
-    $("stWho").hidden = true; fillWho(); $("stWho").value = id; renderStats();
+    fillWho(); $("stWho").value = id; renderStats();
     $("stu").hidden = false;
   }
   function closeStu() {
     if ($("stu").hidden && $("statsPanel").parentNode !== $("uStats")) return;
     $("stu").hidden = true; stuId = null;
-    $("statsHome").after($("statsPanel")); // 통계 칸을 원래 자리로
-    $("stWho").hidden = false; $("stWho").value = ""; renderStats();
+    $("statsHome").append($("statsPanel")); // 통계 칸은 학생 관리 창에서만 보임
+    $("stWho").value = "";
   }
   $("uClose").addEventListener("click", closeStu);
   // --- 기록 조회 (서버에 저장된 날짜별 기록) ---
@@ -639,7 +640,13 @@
                             " · 졸음 " + fmt(d.drowsy_ms) + " · 휴식 " + fmt(d.break_ms);
           var b = document.createElement("button"); b.type = "button"; b.className = "ghost"; b.textContent = "상세";
           b.addEventListener("click", function () { loadEvents(d, day, name); });
-          row.append(txt, b); box.append(row);
+          row.append(txt, b);
+          if (names[d.user_id]) {
+            var mb = document.createElement("button"); mb.type = "button"; mb.className = "ghost"; mb.textContent = "관리·통계";
+            mb.addEventListener("click", function () { openStu(d.user_id); });
+            row.append(mb);
+          }
+          box.append(row);
         });
       }, function (e) { $("hMsg").textContent = "기록을 불러오지 못했습니다: " + e; });
   }
