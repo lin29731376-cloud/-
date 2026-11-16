@@ -45,10 +45,6 @@
   .stat.k b { color: #3b6ea5; }
   .badge[data-s="break"] { background: #3b6ea5; }
   #goalBar { background: var(--study); }
-  ol.rank { list-style: none; margin: 0; padding: 0; font-size: 14px; }
-  ol.rank li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line);
-    font-variant-numeric: tabular-nums; }
-  ol.rank li.me { font-weight: 700; }
   .wake { position: fixed; inset: 0; z-index: 20; background: rgba(192,57,43,.95); color: #fff;
     display: grid; place-items: center; text-align: center; padding: 24px; }
   .wake[hidden] { display: none; }
@@ -132,10 +128,6 @@
           <input type="range" id="rGoal" min="1" max="14" step="0.5" value="4"></label>
         <div class="meter"><i id="goalBar"></i></div>
         <p class="msg" id="goalMsg" style="margin:8px 0 0"></p>
-        <div id="rankBox" hidden>
-          <h2 style="margin-top:16px">오늘 공부시간 순위</h2>
-          <ol class="rank" id="rank"></ol>
-        </div>
       </section>
 
       <section class="panel">
@@ -432,11 +424,10 @@ async function initAccount() {
   if (profile.role !== "admin") { // 학생은 감지 기준을 바꿀 수 없음
     for (const id of ["rAway", "rDrowsy", "rThr"]) $(id).disabled = true;
   }
-  loadRank(); setInterval(loadRank, 60000);
 }
 if (window.smAuth) initAccount(); else document.addEventListener("sm-ready", initAccount, { once: true });
 
-// --- 오늘 목표 · 순위 ---
+// --- 오늘 목표 ---
 let goalHours = Number(store.get("sm_goal")) || 4;
 $("rGoal").value = goalHours;
 function renderGoal() {
@@ -447,21 +438,6 @@ function renderGoal() {
 }
 $("rGoal").addEventListener("input", () => { goalHours = Number($("rGoal").value); store.set("sm_goal", String(goalHours)); renderGoal(); });
 renderGoal();
-function loadRank() { // 서버에 순위 기능(SQL)이 설치돼 있을 때만 표시
-  if (!window.smAuth) return;
-  window.sb.rpc("day_ranking", { d: dayKey }).then(({ data, error }) => {
-    if (error || !Array.isArray(data)) { $("rankBox").hidden = true; return; }
-    const box = $("rank"); box.textContent = "";
-    data.slice(0, 10).forEach((r, i) => {
-      const li = document.createElement("li"), a = document.createElement("span"), b = document.createElement("span");
-      a.textContent = `${i + 1}위 ${r.name || "이름 없음"}` + (r.me ? " (나)" : "");
-      b.textContent = fmt(Number(r.study_ms) || 0);
-      if (r.me) li.className = "me";
-      li.append(a, b); box.append(li);
-    });
-    $("rankBox").hidden = data.length === 0;
-  }, () => { $("rankBox").hidden = true; });
-}
 
 // --- 감지 루프 ---
 function tick() {

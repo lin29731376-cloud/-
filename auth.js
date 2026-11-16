@@ -89,7 +89,6 @@
       '<label class="ck"><input type="radio" name="age" id="a14" value="over"><span>만 14세 이상입니다.</span></label>' +
       '<label class="ck"><input type="radio" name="age" id="u14" value="under"><span>만 14세 미만입니다.</span></label>' +
       '<p class="note" id="u14note" hidden>만 14세 미만은 보호자가 서명한 동의서를 운영자에게 제출해야 가입이 승인됩니다.</p>' +
-      '<label class="ck"><input type="checkbox" id="c4"><span>[선택] 내 이름과 오늘 공부시간을 다른 회원에게 순위로 표시하는 데 동의합니다.</span></label>' +
       '<label class="ck"><input type="checkbox" id="c5"><span>[선택] 학습 리포트를 보호자에게 제공하는 데 동의합니다.</span></label>' +
       '<button type="button" id="cGo">동의하고 계속</button><button type="button" class="ghost" id="aOut">로그아웃</button>' +
       '<p class="amsg" id="aMsg"></p>');
@@ -101,7 +100,7 @@
       if (!q("c1").checked || !q("c2").checked || !q("c3").checked) { msg("필수 항목에 모두 동의해야 이용할 수 있습니다.", true); return; }
       if (!age()) { msg("만 14세 이상인지 선택해 주세요.", true); return; }
       q("cGo").disabled = true; msg("저장 중…");
-      sb.from("consents").insert({ version: VER, under14: age() === "under", rank_ok: q("c4").checked, report_ok: q("c5").checked })
+      sb.from("consents").insert({ version: VER, under14: age() === "under", report_ok: q("c5").checked })
         .then(function (r) {
           if (r.error) { q("cGo").disabled = false; msg("저장 실패: " + r.error.message, true); return; }
           enter();
