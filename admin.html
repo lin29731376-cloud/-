@@ -66,6 +66,36 @@
   .cfg { flex: 1 1 220px; font-size: 13px; }
   .cfg output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .cfg input { width: 100%; margin-top: 4px; accent-color: var(--ink); }
+  .seg[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .sth { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+  .hrow { display: grid; grid-template-columns: minmax(64px, 120px) 1fr auto; gap: 10px; align-items: center; width: 100%;
+    padding: 8px 4px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+    color: var(--ink); font-weight: 400; font-size: 14px; text-align: left; cursor: pointer; }
+  .hrow[aria-pressed="true"] { background: #efe9dc; font-weight: 700; }
+  .hrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrow .track { height: 14px; }
+  .hrow .fill { display: block; height: 100%; background: #2a78d6; border-radius: 0 4px 4px 0; }
+  .hrow .val { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; font-weight: 400; white-space: nowrap; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
+  .tile2 { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
+  .tile2 b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .tile2 span { font-size: 12px; color: var(--muted); }
+  .chart { position: relative; height: 180px; margin: 18px 0 0 40px; border-bottom: 1px solid #cfc8b8; }
+  .chart .gl { position: absolute; left: 0; right: 0; border-top: 1px solid #ebe5d8; }
+  .chart .yl { position: absolute; left: -40px; width: 34px; text-align: right; font-size: 11px; color: var(--muted);
+    transform: translateY(50%); }
+  .cols { position: absolute; inset: 0; display: flex; align-items: stretch; gap: 2px; }
+  .col { flex: 1; min-width: 0; display: flex; align-items: flex-end; justify-content: center; background: transparent;
+    border: 0; border-radius: 0; padding: 0; cursor: pointer; }
+  .col i { display: block; width: 100%; max-width: 24px; background: #2a78d6; border-radius: 4px 4px 0 0; }
+  .col:hover, .col:focus-visible, .col[aria-pressed="true"] { background: rgba(31, 42, 46, .07); outline: none; }
+  .xl { display: flex; gap: 2px; margin: 4px 0 0 40px; font-size: 11px; color: var(--muted); }
+  .xl span { flex: 1; min-width: 0; text-align: center; white-space: nowrap; overflow: visible; }
+  .readout { font-size: 13px; margin: 10px 0 0; min-height: 1.6em; font-variant-numeric: tabular-nums; }
+  .stbl { margin-top: 10px; font-size: 13px; }
+  .stbl table { border-collapse: collapse; width: 100%; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .stbl th, .stbl td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: right; }
+  .stbl th:first-child, .stbl td:first-child { text-align: left; }
   .days { display: flex; gap: 6px; flex-wrap: wrap; }
   .days label { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border: 1px solid var(--line);
     border-radius: 8px; font-size: 14px; background: #fff; }
@@ -130,6 +160,14 @@
     <span class="msg" id="hMsg"></span>
   </div>
 
+  <div class="bar" style="margin-top:12px">
+    <b style="flex:1">통계</b>
+    <button id="st7" class="ghost seg" aria-pressed="true">최근 7일</button>
+    <button id="st30" class="ghost seg" aria-pressed="false">최근 30일</button>
+    <div id="stats" style="flex-basis:100%"></div>
+    <span class="msg" id="stMsg"></span>
+  </div>
+
   <div class="summary" id="summary" hidden>
     <span>접속 <b id="cAll">0</b></span><span>공부 중 <b id="cStudy">0</b></span>
     <span>자리비움 <b id="cAway">0</b></span><span>졸음 의심 <b id="cDrowsy">0</b></span><span>휴식 <b id="cBreak">0</b></span>
@@ -157,15 +195,17 @@
 <div class="modal" id="sched" hidden>
   <div class="box">
     <div class="phead"><b id="sName"></b><button id="sClose" class="ghost">닫기</button></div>
-    <p class="ptitle" style="margin-top:0">출석하는 요일</p>
-    <div class="days" id="sDays"></div>
-    <div class="prow" style="margin-top:14px">
-      <label>시작 <input type="time" id="sStart" value="09:00"></label>
-      <label>종료 <input type="time" id="sEnd" value="13:00"></label>
+    <div id="sList"></div>
+    <p class="ptitle" id="sFormTitle">시간대 추가</p>
+    <input type="text" id="sLabel" placeholder="이름 (예: 6교시, 주말)" maxlength="20" style="width:100%" aria-label="시간대 이름">
+    <div class="days" id="sDays" style="margin-top:10px"></div>
+    <div class="prow" style="margin-top:12px">
+      <label>시작 <input type="time" id="sStart" value="17:30"></label>
+      <label>종료 <input type="time" id="sEnd" value="00:00"></label>
     </div>
-    <p class="ptitle">종료가 시작보다 이르면 다음 날 종료로 봅니다. 예: 22:00~02:00은 밤 10시부터 다음 날 새벽 2시까지이며, 요일은 시작하는 날 기준으로 고릅니다.</p>
-    <div class="prow" style="margin-top:14px">
-      <button id="sSave">저장</button><button id="sDel" class="ghost">출석 시간 삭제</button>
+    <p class="ptitle">밤 12시(24:00)에 끝나면 종료를 00:00으로 넣으세요. 종료가 시작보다 이르면 다음 날 종료로 보며, 요일은 시작하는 날 기준입니다.</p>
+    <div class="prow">
+      <button id="sSave">추가</button><button id="sCancel" class="ghost" hidden>수정 취소</button>
       <span class="msg" id="sMsg"></span>
     </div>
   </div>
@@ -461,7 +501,7 @@
       $("mMsg").textContent = r.data.length ? "" : "아직 가입한 회원이 없습니다.";
       r.data.forEach(function (m) { names[m.id] = m.name || m.email || "(이름 없음)"; });
       loadHistory(); // 이름을 알고 난 뒤에 기록 표시
-      renderAtt();
+      renderAtt(); loadStats();
       r.data.forEach(function (p) {
         names[p.id] = p.name || p.email || "(이름 없음)";
         var row = document.createElement("div"); row.className = "mrow";
@@ -553,20 +593,122 @@
   $("hLoad").addEventListener("click", loadHistory);
   $("hDay").addEventListener("change", loadHistory);
 
+  // --- 통계: 최근 7일 / 30일의 날짜별 공부시간 (서버 기록 기준) ---
+  var stDays = 7, stData = null, stUser = null, WD = ["일", "월", "화", "수", "목", "금", "토"];
+  function keyOf(d) { var p2 = function (x) { return String(x).padStart(2, "0"); }; return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()); }
+  function mk(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function loadStats() {
+    var days = [], t = new Date(); t.setHours(12, 0, 0, 0);
+    for (var i = stDays - 1; i >= 0; i--) days.push(new Date(t.getTime() - i * 86400000));
+    $("stMsg").textContent = "불러오는 중…";
+    window.sb.from("study_days").select("user_id,day,study_ms,away_ms,drowsy_ms,break_ms")
+      .gte("day", keyOf(days[0])).lte("day", keyOf(days[days.length - 1])).limit(1000).then(function (r) {
+        if (r.error) { $("stMsg").textContent = "통계를 불러오지 못했습니다: " + r.error.message; return; }
+        var by = {};
+        r.data.forEach(function (x) { (by[x.user_id] = by[x.user_id] || {})[x.day] = x; });
+        stData = { days: days, by: by }; renderStats();
+      }, function (e) { $("stMsg").textContent = "통계를 불러오지 못했습니다: " + e; });
+  }
+  function renderStats() {
+    var box = $("stats"); box.textContent = "";
+    if (!stData) return;
+    var by = stData.by, days = stData.days, users = Object.keys(by);
+    $("stMsg").textContent = users.length ? "" : "이 기간에는 기록이 없습니다.";
+    if (!users.length) return;
+    var sum = function (uid, f) { var t = 0; Object.keys(by[uid]).forEach(function (k) { t += Number(by[uid][k][f]) || 0; }); return t; };
+    var list = users.map(function (uid) { return { uid: uid, total: sum(uid, "study_ms"), n: Object.keys(by[uid]).filter(function (k) { return Number(by[uid][k].study_ms) > 0; }).length }; })
+      .sort(function (a, b) { return b.total - a.total; });
+    if (!stUser || !by[stUser]) stUser = list[0].uid;
+    var top = Math.max(1, list[0].total);
+
+    // 1) 학생별 합계 (많이 공부한 순)
+    box.append(mk("p", "sth", "학생별 공부시간 합계 — 누르면 아래에 날짜별 기록이 나옵니다"));
+    list.forEach(function (u) {
+      var row = mk("button", "hrow"); row.type = "button"; row.setAttribute("aria-pressed", String(u.uid === stUser));
+      var track = mk("span", "track"), fill = mk("span", "fill"); fill.style.width = (u.total / top * 100) + "%"; track.append(fill);
+      row.append(mk("span", "nm", names[u.uid] || "(알 수 없는 회원)"), track,
+                 mk("span", "val", fmt(u.total) + " · " + u.n + "일"));
+      row.addEventListener("click", function () { stUser = u.uid; renderStats(); });
+      box.append(row);
+    });
+
+    // 2) 선택한 학생의 날짜별 공부시간
+    var mine = by[stUser], vals = days.map(function (d) { return mine[keyOf(d)] || null; });
+    var studied = vals.filter(function (v) { return v && Number(v.study_ms) > 0; }).length;
+    var total = sum(stUser, "study_ms");
+    box.append(mk("p", "sth", (names[stUser] || "회원") + " — 최근 " + stDays + "일"));
+    var tiles = mk("div", "tiles");
+    [["공부시간 합계", fmt(total)], ["공부한 날", studied + " / " + stDays + "일"],
+     ["하루 평균 (공부한 날 기준)", studied ? fmt(total / studied) : "—"],
+     ["자리비움 합계", fmt(sum(stUser, "away_ms"))], ["졸음 의심 합계", fmt(sum(stUser, "drowsy_ms"))]].forEach(function (x) {
+      var t = mk("div", "tile2"); t.append(mk("b", "", x[1]), mk("span", "", x[0])); tiles.append(t);
+    });
+    box.append(tiles);
+
+    var maxMs = 0; vals.forEach(function (v) { if (v) maxMs = Math.max(maxMs, Number(v.study_ms) || 0); });
+    var maxH = Math.max(1, Math.ceil(maxMs / 3600000)); if (maxH > 2 && maxH % 2) maxH++; // 눈금이 깔끔하게 나오도록 짝수 시간으로
+    var chart = mk("div", "chart");
+    [[100, maxH], [50, maxH / 2], [0, 0]].forEach(function (g) {
+      if (g[0]) { var gl = mk("div", "gl"); gl.style.bottom = g[0] + "%"; chart.append(gl); }
+      var yl = mk("div", "yl", g[1] ? g[1] + "시간" : "0"); yl.style.bottom = g[0] + "%"; chart.append(yl);
+    });
+    var cols = mk("div", "cols"), readout = mk("p", "readout", "막대에 마우스를 올리거나 누르면 그날 기록이 나옵니다."), xl = mk("div", "xl");
+    days.forEach(function (d, i) {
+      var v = vals[i], ms = v ? Number(v.study_ms) || 0 : 0;
+      var label = (d.getMonth() + 1) + "월 " + d.getDate() + "일 (" + WD[d.getDay()] + ")";
+      var text = label + " · " + (v ? "공부 " + fmt(ms) + " · 자리비움 " + fmt(v.away_ms) + " · 졸음 의심 " + fmt(v.drowsy_ms) + " · 휴식 " + fmt(v.break_ms) : "기록 없음");
+      var col = mk("button", "col"); col.type = "button"; col.setAttribute("aria-label", text); col.setAttribute("aria-pressed", "false");
+      var bar = mk("i"); bar.style.height = (ms / (maxH * 3600000) * 100) + "%"; if (ms > 0) bar.style.minHeight = "2px"; col.append(bar);
+      var show = function () {
+        cols.querySelectorAll(".col").forEach(function (c) { c.setAttribute("aria-pressed", "false"); });
+        col.setAttribute("aria-pressed", "true"); readout.textContent = text;
+      };
+      col.addEventListener("pointerenter", show); col.addEventListener("focus", show); col.addEventListener("click", show);
+      cols.append(col);
+      var every = stDays <= 7 ? 1 : 5, on = (days.length - 1 - i) % every === 0;
+      var xs = mk("span", "", on ? (stDays <= 7 ? d.getDate() + "(" + WD[d.getDay()] + ")" : (d.getMonth() + 1) + "/" + d.getDate()) : "");
+      if (stDays > 7 && i === days.length - 1) { xs.style.direction = "rtl"; } // 마지막 라벨은 안쪽으로 붙임
+      xl.append(xs);
+    });
+    chart.append(cols); box.append(chart, xl, readout);
+
+    // 3) 같은 내용을 표로
+    var det = mk("details", "stbl"); det.append(mk("summary", "", "표로 보기"));
+    var tb = mk("table"), hr = mk("tr");
+    ["날짜", "공부", "자리비움", "졸음 의심", "휴식"].forEach(function (h) { hr.append(mk("th", "", h)); }); tb.append(hr);
+    days.slice().reverse().forEach(function (d) {
+      var v = mine[keyOf(d)], tr = mk("tr");
+      tr.append(mk("td", "", (d.getMonth() + 1) + "/" + d.getDate() + " (" + WD[d.getDay()] + ")"));
+      ["study_ms", "away_ms", "drowsy_ms", "break_ms"].forEach(function (f) { tr.append(mk("td", "", v ? fmt(v[f]) : "—")); });
+      tb.append(tr);
+    });
+    det.append(tb); box.append(det);
+  }
+  function setRange(n) {
+    stDays = n; $("st7").setAttribute("aria-pressed", String(n === 7)); $("st30").setAttribute("aria-pressed", String(n === 30)); loadStats();
+  }
+  $("st7").addEventListener("click", function () { setRange(7); });
+  $("st30").addEventListener("click", function () { setRange(30); });
+
   // --- 출석 체크: 회원별 출석 시간과 오늘 첫 접속 시각을 비교 (이 화면이 열려 있는 동안 동작) ---
   var DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"], GRACE = 10 * 60000;
-  var scheds = null, schedUid = null; // scheds: 회원 id → 출석 시간 (서버 설정 전이면 null)
-  DAY_NAMES.forEach(function (n, i) {
+  var scheds = null, schedUid = null, editId = null; // scheds: 회원 id → 시간대 목록 // scheds: 회원 id → 출석 시간 (서버 설정 전이면 null)
+  var DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 월~일 순으로 표시
+  DAY_ORDER.forEach(function (i) {
     var l = document.createElement("label"), c = document.createElement("input");
-    c.type = "checkbox"; c.value = i; l.append(c, document.createTextNode(n)); $("sDays").append(l);
+    c.type = "checkbox"; c.value = i; l.append(c, document.createTextNode(DAY_NAMES[i])); $("sDays").append(l);
   });
+  function isOver(sc) { return hm(sc.end_time) <= hm(sc.start_time); } // 다음 날 종료
+  function endText(sc) { var e = hm(sc.end_time); return e === "00:00" ? "24:00" : e; }
+  function daysText(days) { return DAY_ORDER.filter(function (i) { return (days || []).indexOf(i) >= 0; }).map(function (i) { return DAY_NAMES[i]; }).join(" "); }
   function hm(t) { return String(t).slice(0, 5); }
   function todayAt(t) { var x = String(t).split(":"), d = new Date(); d.setHours(Number(x[0]), Number(x[1]), 0, 0); return d.getTime(); }
   function hhmm(ms) { return new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function loadSched() {
-    window.sb.from("schedules").select("user_id,days,start_time,end_time").then(function (r) {
+    window.sb.from("schedule_slots").select("id,user_id,name,days,start_time,end_time").order("start_time").then(function (r) {
       if (r.error || !r.data) { scheds = null; renderAtt(); return; }
-      scheds = {}; r.data.forEach(function (x) { scheds[x.user_id] = x; });
+      scheds = {}; r.data.forEach(function (x) { (scheds[x.user_id] = scheds[x.user_id] || []).push(x); });
+      if (!$("sched").hidden) renderSlots();
       loadArrivals();
     }, function () { scheds = null; renderAtt(); });
   }
@@ -584,7 +726,7 @@
   }
   function sessionsNow(sc) { // 지금 표시할 출석 시간대: 오늘 시작분 + 어제 시작해 아직 안 끝난 분
     var out = [], dow = new Date().getDay(), days = sc.days || [];
-    var over = hm(sc.end_time) <= hm(sc.start_time); // 종료가 시작보다 이르면 다음 날 종료
+    var over = isOver(sc); // 종료가 시작보다 이르면 다음 날 종료
     var s0 = todayAt(sc.start_time), e0 = todayAt(sc.end_time) + (over ? 86400000 : 0);
     if (over && days.indexOf((dow + 6) % 7) >= 0 && Date.now() < e0 - 86400000) {
       out.push({ start: s0 - 86400000, end: e0 - 86400000, over: true, fromYesterday: true });
@@ -614,7 +756,9 @@
     if (!scheds) { $("attMsg").textContent = "출석 체크를 쓰려면 서버 설정(SQL)을 실행하세요."; return; }
     var now = Date.now(), rows = [];
     Object.keys(scheds).forEach(function (uid) {
-      sessionsNow(scheds[uid]).forEach(function (ses) { rows.push({ uid: uid, sc: scheds[uid], ses: ses }); });
+      scheds[uid].forEach(function (sc) {
+        sessionsNow(sc).forEach(function (ses) { rows.push({ uid: uid, sc: sc, ses: ses }); });
+      });
     });
     rows.sort(function (a, b) { return a.ses.start - b.ses.start; });
     $("attMsg").textContent = rows.length ? "" : "오늘 출석 예정인 회원이 없습니다. 회원 관리의 「출석 시간」에서 정하세요.";
@@ -629,36 +773,63 @@
       else { text = "결석"; kind = "absent"; }
       var row = document.createElement("div"); row.className = "mrow";
       var a = document.createElement("span"), b = document.createElement("b");
-      a.textContent = name + " · " + (ses.fromYesterday ? "어제 " : "") + hm(r.sc.start_time) + "~" + (ses.over ? (ses.fromYesterday ? "오늘 " : "다음 날 ") : "") + hm(r.sc.end_time);
+      var endsNextDay = ses.over && hm(r.sc.end_time) !== "00:00"; // 24:00 종료는 '다음 날' 표시를 붙이지 않음
+      a.textContent = name + (r.sc.name ? " · " + r.sc.name : "") + " · " + (ses.fromYesterday ? "어제 " : "") + hm(r.sc.start_time) + "~" +
+                      (endsNextDay ? (ses.fromYesterday ? "오늘 " : "다음 날 ") : "") + endText(r.sc);
       b.textContent = text; b.dataset.a = kind;
       row.append(a, b); box.append(row);
     });
   }
+  function resetSlotForm() {
+    editId = null; $("sLabel").value = ""; $("sStart").value = "17:30"; $("sEnd").value = "00:00";
+    $("sDays").querySelectorAll("input").forEach(function (c) { c.checked = false; });
+    $("sFormTitle").textContent = "시간대 추가"; $("sSave").textContent = "추가"; $("sCancel").hidden = true;
+  }
+  function renderSlots() {
+    var box = $("sList"); box.textContent = "";
+    var list = (scheds && scheds[schedUid]) || [];
+    if (!list.length) { var e = document.createElement("p"); e.className = "msg"; e.textContent = "아직 정해진 시간대가 없습니다."; box.append(e); return; }
+    list.forEach(function (sc) {
+      var row = document.createElement("div"); row.className = "mrow";
+      var t = document.createElement("span");
+      t.textContent = (sc.name || "(이름 없음)") + " · " + hm(sc.start_time) + "~" + endText(sc) + " · " + daysText(sc.days);
+      var eb = document.createElement("button"); eb.type = "button"; eb.className = "ghost"; eb.textContent = "수정";
+      eb.addEventListener("click", function () {
+        editId = sc.id; $("sLabel").value = sc.name || ""; $("sStart").value = hm(sc.start_time);
+        $("sEnd").value = hm(sc.end_time) === "24:00" ? "00:00" : hm(sc.end_time);
+        $("sDays").querySelectorAll("input").forEach(function (c) { c.checked = (sc.days || []).indexOf(Number(c.value)) >= 0; });
+        $("sFormTitle").textContent = "시간대 수정"; $("sSave").textContent = "수정 저장"; $("sCancel").hidden = false; $("sMsg").textContent = "";
+      });
+      var db = document.createElement("button"); db.type = "button"; db.className = "ghost"; db.textContent = "삭제";
+      db.addEventListener("click", function () {
+        db.disabled = true; $("sMsg").textContent = "삭제 중…";
+        window.sb.from("schedule_slots").delete().eq("id", sc.id).then(function (r) {
+          if (r.error) { db.disabled = false; $("sMsg").textContent = "삭제 실패: " + r.error.message; return; }
+          $("sMsg").textContent = ""; if (editId === sc.id) resetSlotForm(); loadSched();
+        }, function (e) { db.disabled = false; $("sMsg").textContent = "삭제 실패: " + e; });
+      });
+      row.append(t, eb, db); box.append(row);
+    });
+  }
   function openSched(uid, name) {
     schedUid = uid; $("sName").textContent = name + " — 출석 시간"; $("sMsg").textContent = "";
-    var sc = scheds && scheds[uid];
-    $("sDays").querySelectorAll("input").forEach(function (c) { c.checked = sc ? (sc.days || []).indexOf(Number(c.value)) >= 0 : (Number(c.value) >= 1 && Number(c.value) <= 5); });
-    $("sStart").value = sc ? hm(sc.start_time) : "09:00"; $("sEnd").value = sc ? hm(sc.end_time) : "13:00";
-    $("sched").hidden = false;
+    resetSlotForm(); renderSlots(); $("sched").hidden = false;
   }
   $("sClose").addEventListener("click", function () { $("sched").hidden = true; });
+  $("sCancel").addEventListener("click", function () { resetSlotForm(); $("sMsg").textContent = ""; });
   $("sSave").addEventListener("click", function () {
     var days = []; $("sDays").querySelectorAll("input").forEach(function (c) { if (c.checked) days.push(Number(c.value)); });
-    var st = $("sStart").value, en = $("sEnd").value;
+    var st = $("sStart").value, en = $("sEnd").value, label = $("sLabel").value.trim();
     if (!days.length) { $("sMsg").textContent = "요일을 하나 이상 고르세요."; return; }
     if (!st || !en || st === en) { $("sMsg").textContent = "시작과 종료 시간이 같을 수 없습니다."; return; }
-    $("sMsg").textContent = "저장 중…";
-    window.sb.from("schedules").upsert({ user_id: schedUid, days: days, start_time: st, end_time: en }, { onConflict: "user_id" }).then(function (r) {
+    var row = { user_id: schedUid, name: label, days: days, start_time: st, end_time: en };
+    var q = editId ? window.sb.from("schedule_slots").update(row).eq("id", editId) : window.sb.from("schedule_slots").insert(row);
+    $("sSave").disabled = true; $("sMsg").textContent = "저장 중…";
+    q.then(function (r) {
+      $("sSave").disabled = false;
       if (r.error) { $("sMsg").textContent = "저장 실패: " + r.error.message + " (서버 설정 SQL을 실행했는지 확인하세요)"; return; }
-      $("sched").hidden = true; loadSched();
-    }, function (e) { $("sMsg").textContent = "저장 실패: " + e; });
-  });
-  $("sDel").addEventListener("click", function () {
-    $("sMsg").textContent = "삭제 중…";
-    window.sb.from("schedules").delete().eq("user_id", schedUid).then(function (r) {
-      if (r.error) { $("sMsg").textContent = "삭제 실패: " + r.error.message; return; }
-      $("sched").hidden = true; loadSched();
-    }, function (e) { $("sMsg").textContent = "삭제 실패: " + e; });
+      $("sMsg").textContent = "저장했습니다."; resetSlotForm(); loadSched();
+    }, function (e) { $("sSave").disabled = false; $("sMsg").textContent = "저장 실패: " + e; });
   });
   $("attReload").addEventListener("click", loadSched);
   setInterval(loadArrivals, 60000);
