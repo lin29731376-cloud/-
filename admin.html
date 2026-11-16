@@ -67,6 +67,14 @@
   .cfg output { float: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .cfg input { width: 100%; margin-top: 4px; accent-color: var(--ink); }
   .seg[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .mtools { flex-basis: 100%; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .mtools input[type=search] { flex: 1 1 220px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px;
+    font: inherit; background: #fff; color: var(--ink); }
+  .mchk { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+  .mlist { flex-basis: 100%; max-height: 420px; overflow-y: auto; }
+  .box.wide { width: min(900px, 100%); }
+  #sched { z-index: 12; } /* 학생 관리 창 위에 뜨도록 */
+  #uStats .bar { margin-top: 14px; }
   .stnav { flex-basis: 100%; display: flex; align-items: center; gap: 10px; }
   .stnav span { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 150px; text-align: center; }
   .stnav button { padding: 8px 14px; }
@@ -142,7 +150,12 @@
   <div class="bar" style="margin-top:12px">
     <b style="flex:1">회원 관리</b>
     <button id="mReload" class="ghost">새로고침</button>
-    <div id="members" style="flex-basis:100%"></div>
+    <div class="mtools">
+      <input type="search" id="mSearch" placeholder="이름 또는 이메일로 검색" autocomplete="off" aria-label="회원 검색">
+      <label class="mchk"><input type="checkbox" id="mPending"> 승인 대기만</label>
+      <span class="msg" id="mCount"></span>
+    </div>
+    <div id="members" class="mlist"></div>
     <span class="msg" id="mMsg"></span>
   </div>
 
@@ -166,7 +179,8 @@
     <span class="msg" id="hMsg"></span>
   </div>
 
-  <div class="bar" style="margin-top:12px">
+  <div id="statsHome"></div>
+  <div class="bar" id="statsPanel" style="margin-top:12px">
     <b style="flex:1">통계</b>
     <button id="st7" class="ghost seg" aria-pressed="true">최근 7일</button>
     <button id="st30" class="ghost seg" aria-pressed="false">최근 30일</button>
@@ -220,6 +234,16 @@
       <button id="sSave">추가</button><button id="sCancel" class="ghost" hidden>수정 취소</button>
       <span class="msg" id="sMsg"></span>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="stu" hidden>
+  <div class="box wide">
+    <div class="phead"><b id="uName"></b><button id="uClose" class="ghost">닫기</button></div>
+    <p class="msg" id="uInfo" style="margin:0 0 10px"></p>
+    <div class="prow" id="uActs"></div>
+    <p class="msg" id="uMsg" style="margin:10px 0 0"></p>
+    <div id="uStats"></div>
   </div>
 </div>
 
@@ -506,55 +530,97 @@
       loadMemberRows();
     }, function () { cons = null; loadMemberRows(); });
   }
+  var members = [], stuId = null; // members: 전체 회원 목록, stuId: 학생 관리 창에서 보고 있는 회원
   function loadMemberRows() {
     window.sb.from("profiles").select("id,email,name,role").order("created_at").then(function (r) {
-      var box = $("members"); box.textContent = "";
-      if (r.error) { $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + r.error.message; return; }
-      $("mMsg").textContent = r.data.length ? "" : "아직 가입한 회원이 없습니다.";
-      r.data.forEach(function (m) { names[m.id] = m.name || m.email || "(이름 없음)"; });
+      if (r.error) { $("members").textContent = ""; $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + r.error.message; return; }
+      members = r.data || [];
+      $("mMsg").textContent = members.length ? "" : "아직 가입한 회원이 없습니다.";
+      members.forEach(function (m) { names[m.id] = m.name || m.email || "(이름 없음)"; });
       loadHistory(); // 이름을 알고 난 뒤에 기록 표시
       renderAtt(); loadStats();
-      r.data.forEach(function (p) {
-        names[p.id] = p.name || p.email || "(이름 없음)";
-        var row = document.createElement("div"); row.className = "mrow";
-        var who = document.createElement("span");
-        who.textContent = (p.name || "(이름 없음)") + " · " + (p.email || "") + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
-        row.append(who);
-        if (p.role !== "admin") {
-          var b = document.createElement("button"); b.type = "button";
-          var to = p.role === "pending" ? "student" : "pending";
-          b.textContent = p.role === "pending" ? "승인" : "이용 정지";
-          if (p.role !== "pending") b.className = "ghost";
-          b.addEventListener("click", function () {
-            b.disabled = true;
-            window.sb.rpc("set_role", { target: p.id, new_role: to }).then(function (x) {
-              if (x.error) { $("mMsg").textContent = "변경 실패: " + x.error.message; b.disabled = false; return; }
-              loadMembers();
-            });
-          });
-          row.append(b);
-          var pb = document.createElement("button"); pb.type = "button"; pb.className = "ghost"; pb.textContent = "비밀번호 재설정";
-          pb.addEventListener("click", function () {
-            var pw = window.prompt((p.name || p.email) + " 님의 새 임시 비밀번호를 입력하세요 (6자 이상)");
-            if (pw === null) return;
-            if (pw.length < 6) { $("mMsg").textContent = "비밀번호는 6자 이상이어야 합니다."; return; }
-            pb.disabled = true; $("mMsg").textContent = "변경 중…";
-            window.sb.rpc("admin_set_password", { target: p.id, new_password: pw }).then(function (x) {
-              pb.disabled = false;
-              $("mMsg").textContent = x.error
-                ? "재설정 실패: " + x.error.message
-                : (p.name || p.email) + " 님의 비밀번호를 바꿨습니다. 임시 비밀번호를 알려주고, 로그인 후 직접 바꾸게 하세요.";
-            }, function (e) { pb.disabled = false; $("mMsg").textContent = "재설정 실패: " + e; });
-          });
-          row.append(pb);
-        }
-        var sb2 = document.createElement("button"); sb2.type = "button"; sb2.className = "ghost"; sb2.textContent = "출석 시간";
-        sb2.addEventListener("click", function () { openSched(p.id, p.name || p.email || "회원"); });
-        row.append(sb2);
-        box.append(row);
-      });
+      renderMembers();
+      if (stuId && !$("stu").hidden) fillStu(); // 열려 있는 학생 관리 창도 최신 상태로
     }, function (e) { $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + e; });
   }
+  function setRole(p, to, done) {
+    window.sb.rpc("set_role", { target: p.id, new_role: to }).then(function (x) {
+      if (x.error) { done("변경 실패: " + x.error.message); return; }
+      done(""); loadMembers();
+    }, function (e) { done("변경 실패: " + e); });
+  }
+  function renderMembers() { // 검색어와 '승인 대기만'에 맞는 회원만 표시
+    var box = $("members"); box.textContent = "";
+    var q = $("mSearch").value.trim().toLowerCase(), onlyPending = $("mPending").checked;
+    var list = members.filter(function (p) {
+      if (onlyPending && p.role !== "pending") return false;
+      return !q || (p.name || "").toLowerCase().indexOf(q) >= 0 || (p.email || "").toLowerCase().indexOf(q) >= 0;
+    });
+    var pend = members.filter(function (p) { return p.role === "pending"; }).length;
+    $("mCount").textContent = "전체 " + members.length + "명 · 표시 " + list.length + "명" + (pend ? " · 승인 대기 " + pend + "명" : "");
+    if (members.length && !list.length) { box.append(document.createTextNode("조건에 맞는 회원이 없습니다.")); return; }
+    list.forEach(function (p) {
+      var row = document.createElement("div"); row.className = "mrow";
+      var who = document.createElement("span");
+      who.textContent = (p.name || "(이름 없음)") + " · " + (p.email || "") + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
+      row.append(who);
+      if (p.role === "pending") { // 자주 쓰는 승인은 목록에서 바로
+        var ab = document.createElement("button"); ab.type = "button"; ab.textContent = "승인";
+        ab.addEventListener("click", function () { ab.disabled = true; setRole(p, "student", function (err) { if (err) { $("mMsg").textContent = err; ab.disabled = false; } }); });
+        row.append(ab);
+      }
+      var mb = document.createElement("button"); mb.type = "button"; mb.className = "ghost"; mb.textContent = "관리";
+      mb.addEventListener("click", function () { openStu(p.id); });
+      row.append(mb);
+      box.append(row);
+    });
+  }
+  $("mSearch").addEventListener("input", renderMembers);
+  $("mPending").addEventListener("change", renderMembers);
+
+  // --- 학생 관리 창: 한 회원의 승인·비밀번호·출석 시간·통계를 한곳에서 ---
+  function fillStu() {
+    var p = null; members.forEach(function (m) { if (m.id === stuId) p = m; });
+    if (!p) { closeStu(); return; }
+    var label = p.name || p.email || "회원";
+    $("uName").textContent = label + " — 학생 관리";
+    $("uInfo").textContent = (p.email || "") + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
+    var acts = $("uActs"); acts.textContent = "";
+    var add = function (text, ghost, fn) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = text; if (ghost) b.className = "ghost";
+      b.addEventListener("click", function () { fn(b); }); acts.append(b); return b;
+    };
+    if (p.role !== "admin") {
+      add(p.role === "pending" ? "승인" : "이용 정지", p.role !== "pending", function (b) {
+        b.disabled = true; setRole(p, p.role === "pending" ? "student" : "pending", function (err) { $("uMsg").textContent = err; b.disabled = false; });
+      });
+      add("비밀번호 재설정", true, function (b) {
+        var pw = window.prompt(label + " 님의 새 임시 비밀번호를 입력하세요 (6자 이상)");
+        if (pw === null) return;
+        if (pw.length < 6) { $("uMsg").textContent = "비밀번호는 6자 이상이어야 합니다."; return; }
+        b.disabled = true; $("uMsg").textContent = "변경 중…";
+        window.sb.rpc("admin_set_password", { target: p.id, new_password: pw }).then(function (x) {
+          b.disabled = false;
+          $("uMsg").textContent = x.error ? "재설정 실패: " + x.error.message
+            : "비밀번호를 바꿨습니다. 임시 비밀번호를 알려주고, 로그인 후 직접 바꾸게 하세요.";
+        }, function (e) { b.disabled = false; $("uMsg").textContent = "재설정 실패: " + e; });
+      });
+    }
+    add("출석 시간", true, function () { openSched(p.id, label); });
+  }
+  function openStu(id) {
+    stuId = id; $("uMsg").textContent = ""; fillStu();
+    $("uStats").append($("statsPanel")); // 통계 칸을 이 창 안으로 옮겨 이 학생 것만 표시
+    $("stWho").hidden = true; fillWho(); $("stWho").value = id; renderStats();
+    $("stu").hidden = false;
+  }
+  function closeStu() {
+    if ($("stu").hidden && $("statsPanel").parentNode !== $("uStats")) return;
+    $("stu").hidden = true; stuId = null;
+    $("statsHome").after($("statsPanel")); // 통계 칸을 원래 자리로
+    $("stWho").hidden = false; $("stWho").value = ""; renderStats();
+  }
+  $("uClose").addEventListener("click", closeStu);
   // --- 기록 조회 (서버에 저장된 날짜별 기록) ---
   function loadHistory() {
     var day = $("hDay").value;
