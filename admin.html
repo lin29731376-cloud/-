@@ -70,6 +70,9 @@
   .stnav { flex-basis: 100%; display: flex; align-items: center; gap: 10px; }
   .stnav span { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 150px; text-align: center; }
   .stnav button { padding: 8px 14px; }
+  .stnav { flex-wrap: wrap; }
+  .stnav select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff;
+    color: var(--ink); max-width: 100%; }
   .sth { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
   .hrow { display: grid; grid-template-columns: minmax(64px, 120px) 1fr auto; gap: 10px; align-items: center; width: 100%;
     padding: 8px 4px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
@@ -171,6 +174,7 @@
       <button id="stPrev" class="ghost">‹ 이전</button>
       <span id="stRange"></span>
       <button id="stNext" class="ghost" disabled>다음 ›</button>
+      <select id="stWho" aria-label="볼 사람 선택"></select>
     </div>
     <div id="stats" style="flex-basis:100%"></div>
     <span class="msg" id="stMsg"></span>
@@ -617,22 +621,36 @@
         if (r.error) { $("stMsg").textContent = "통계를 불러오지 못했습니다: " + r.error.message; return; }
         var by = {};
         r.data.forEach(function (x) { (by[x.user_id] = by[x.user_id] || {})[x.day] = x; });
-        stData = { days: days, by: by }; renderStats();
+        stData = { days: days, by: by }; fillWho(); renderStats();
       }, function (e) { $("stMsg").textContent = "통계를 불러오지 못했습니다: " + e; });
   }
+  function fillWho() { // 사람 선택 목록: 전체 + 모든 회원 (이 기간에 기록이 없는 사람도 고를 수 있음)
+    var sel = $("stWho"), keep = sel.value, ids = {};
+    Object.keys(names).forEach(function (id) { ids[id] = 1; });
+    if (stData) Object.keys(stData.by).forEach(function (id) { ids[id] = 1; });
+    sel.textContent = "";
+    var all = document.createElement("option"); all.value = ""; all.textContent = "전체 보기"; sel.append(all);
+    Object.keys(ids).sort(function (a, b) { return (names[a] || "").localeCompare(names[b] || "", "ko"); }).forEach(function (id) {
+      var o = document.createElement("option"); o.value = id; o.textContent = names[id] || "(알 수 없는 회원)"; sel.append(o);
+    });
+    sel.value = keep; if (sel.value !== keep) sel.value = "";
+  }
+  $("stWho").addEventListener("change", function () { renderStats(); });
   function renderStats() {
     var box = $("stats"); box.textContent = "";
     if (!stData) return;
-    var by = stData.by, days = stData.days, users = Object.keys(by);
-    $("stMsg").textContent = users.length ? "" : "이 기간에는 기록이 없습니다.";
-    if (!users.length) return;
-    var sum = function (uid, f) { var t = 0; Object.keys(by[uid]).forEach(function (k) { t += Number(by[uid][k][f]) || 0; }); return t; };
+    var by = stData.by, days = stData.days, users = Object.keys(by), pick = $("stWho").value; // pick: 고른 사람 ("" = 전체)
+    $("stMsg").textContent = users.length || pick ? "" : "이 기간에는 기록이 없습니다.";
+    if (!users.length && !pick) return;
+    var sum = function (uid, f) { var t = 0, m = by[uid] || {}; Object.keys(m).forEach(function (k) { t += Number(m[k][f]) || 0; }); return t; };
     var list = users.map(function (uid) { return { uid: uid, total: sum(uid, "study_ms"), n: Object.keys(by[uid]).filter(function (k) { return Number(by[uid][k].study_ms) > 0; }).length }; })
       .sort(function (a, b) { return b.total - a.total; });
-    if (!stUser || !by[stUser]) stUser = list[0].uid;
-    var top = Math.max(1, list[0].total);
+    if (pick) stUser = pick;
+    else if (!stUser || !by[stUser]) stUser = list[0].uid;
+    var top = Math.max(1, list.length ? list[0].total : 0);
 
-    // 1) 학생별 합계 (많이 공부한 순)
+    // 1) 학생별 합계 (많이 공부한 순) — 한 사람만 볼 때는 생략
+    if (!pick) {
     box.append(mk("p", "sth", "학생별 공부시간 합계 — 누르면 아래에 날짜별 기록이 나옵니다"));
     list.forEach(function (u) {
       var row = mk("button", "hrow"); row.type = "button"; row.setAttribute("aria-pressed", String(u.uid === stUser));
@@ -642,9 +660,10 @@
       row.addEventListener("click", function () { stUser = u.uid; renderStats(); });
       box.append(row);
     });
+    }
 
     // 2) 선택한 학생의 날짜별 공부시간
-    var mine = by[stUser], vals = days.map(function (d) { return mine[keyOf(d)] || null; });
+    var mine = by[stUser] || {}, vals = days.map(function (d) { return mine[keyOf(d)] || null; });
     var studied = vals.filter(function (v) { return v && Number(v.study_ms) > 0; }).length;
     var total = sum(stUser, "study_ms");
     box.append(mk("p", "sth", (names[stUser] || "회원") + " — " + (stOff ? rangeText(days) : "최근 " + stDays + "일")));
@@ -661,7 +680,7 @@
     var chart = mk("div", "chart");
     [[100, maxH], [50, maxH / 2], [0, 0]].forEach(function (g) {
       if (g[0]) { var gl = mk("div", "gl"); gl.style.bottom = g[0] + "%"; chart.append(gl); }
-      var yl = mk("div", "yl", g[1] ? g[1] + "시간" : "0"); yl.style.bottom = g[0] + "%"; chart.append(yl);
+      var yl = mk("div", "yl", g[1] ? (g[1] === 0.5 ? "30분" : g[1] + "시간") : "0"); yl.style.bottom = g[0] + "%"; chart.append(yl);
     });
     var cols = mk("div", "cols"), readout = mk("p", "readout", "막대에 마우스를 올리거나 누르면 그날 기록이 나옵니다."), xl = mk("div", "xl");
     days.forEach(function (d, i) {
