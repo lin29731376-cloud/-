@@ -392,7 +392,10 @@
 
   // --- 재생기 ---
   var cur = null, curUrl = null, playTimer = null, pos = 0;
-  function clock(ms) { return new Date(ms).toLocaleTimeString("ko-KR", { hour12: false }); }
+  function clock(ms) { // 브라우저마다 다르게 나오지 않도록 HH:MM:SS로 직접 만듦
+    var d = new Date(ms), z = function (x) { return String(x).padStart(2, "0"); };
+    return z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
+  }
   function syncSeek() {
     var n = cur ? cur.frames.length : 0;
     $("pSeek").max = Math.max(0, n - 1);
@@ -926,7 +929,7 @@
   function daysText(days) { return DAY_ORDER.filter(function (i) { return (days || []).indexOf(i) >= 0; }).map(function (i) { return DAY_NAMES[i]; }).join(" "); }
   function hm(t) { return String(t).slice(0, 5); }
   function todayAt(t) { var x = String(t).split(":"), d = new Date(); d.setHours(Number(x[0]), Number(x[1]), 0, 0); return d.getTime(); }
-  function hhmm(ms) { return new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }); }
+  function hhmm(ms) { var d = new Date(ms); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
   function loadSched() {
     window.sb.from("schedule_slots").select("id,user_id,name,days,start_time,end_time,created_at").order("start_time").then(function (r) {
       if (r.error || !r.data) { scheds = null; renderAtt(); return; }

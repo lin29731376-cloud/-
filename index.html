@@ -164,6 +164,10 @@
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js"></script>
 <script src="auth.js"></script>
 <script type="module">
+function clockNow() { // HH:MM:SS
+  const d = new Date(), z = (x) => String(x).padStart(2, "0");
+  return z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
+}
 const MP = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 const LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", break: "휴식 중" };
@@ -216,7 +220,7 @@ function addLog(text) {
   const log = $("log");
   const empty = log.querySelector(".empty"); if (empty) empty.remove();
   const li = document.createElement("li"), t = document.createElement("time"), s = document.createElement("span");
-  t.textContent = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+  t.textContent = clockNow();
   s.textContent = text; li.append(t, s); log.prepend(li);
 }
 function beep() {
@@ -249,7 +253,7 @@ async function notify(what, urgent) {
   const topic = $("topic").value.trim().replace(/[^A-Za-z0-9_-]/g, "");
   if (!topic) return false;
   const who = $("who").value.trim() || "이름 미입력";
-  const at = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+  const at = clockNow();
   try {
     const r = await fetch("https://ntfy.sh/", {
       method: "POST",
