@@ -115,6 +115,8 @@
     border-radius: 8px; font-size: 14px; background: #fff; }
   input[type=time] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit;
     background: #fff; color: var(--ink); }
+  #ahList .mrow, #dayAtt .mrow { font-size: 14px; }
+  #dayAtt .sth, #ahList .sth { margin: 4px 0; }
   .mrow b[data-a="ok"] { color: var(--study); }
   .mrow b[data-a="late"] { color: var(--away); }
   .mrow b[data-a="absent"] { color: var(--drowsy); }
@@ -175,6 +177,7 @@
     <b style="flex:1">하루 기록</b>
     <input type="date" id="hDay" aria-label="조회할 날짜">
     <button id="hLoad" class="ghost">조회</button>
+    <div id="dayAtt" style="flex-basis:100%"></div>
     <div id="hist" style="flex-basis:100%"></div>
     <span class="msg" id="hMsg"></span>
   </div>
@@ -245,6 +248,12 @@
     <div class="prow" id="uActs"></div>
     <p class="msg" id="uMsg" style="margin:10px 0 0"></p>
     <div id="uStats"></div>
+    <div class="bar" id="attHist" style="margin-top:14px">
+      <b style="flex-basis:100%">출석 기록 — 위 통계와 같은 기간</b>
+      <div id="ahTiles" class="tiles" style="flex-basis:100%"></div>
+      <div id="ahList" style="flex-basis:100%"></div>
+      <span class="msg" id="ahMsg"></span>
+    </div>
   </div>
 </div>
 
@@ -579,6 +588,102 @@
   $("mSearch").addEventListener("input", renderMembers);
   $("mPending").addEventListener("change", renderMembers);
 
+  // --- 출석 이력: 시간대별로 그날 출석·지각·결석을 계산 (공부 시작 기록 기준) ---
+  function dayAt(d, t) { var x = String(t).split(":"), r = new Date(d); r.setHours(Number(x[0]), Number(x[1]), 0, 0); return r.getTime(); }
+  function sessionsOn(d, slots) { // 날짜 d에 시작하는 시간대 목록
+    var dow = d.getDay(), d0 = new Date(d); d0.setHours(0, 0, 0, 0);
+    var out = [];
+    (slots || []).forEach(function (sc) {
+      if ((sc.days || []).indexOf(dow) < 0) return;
+      if (sc.created_at && new Date(sc.created_at).getTime() > d0.getTime() + 86400000) return; // 시간대를 만들기 전 날짜는 제외
+      var st = dayAt(d0, sc.start_time), en = dayAt(d0, sc.end_time); if (en <= st) en += 86400000;
+      out.push({ sc: sc, start: st, end: en });
+    });
+    return out.sort(function (a, b) { return a.start - b.start; });
+  }
+  function judge(ses, list) { // list: 그 회원의 공부 시작 시각들 (시간순)
+    var from = ses.start - 3 * 3600000, now = Date.now(), f = 0;
+    for (var i = 0; i < list.length; i++) if (list[i] >= from && list[i] < ses.end) { f = list[i]; break; }
+    if (f) return f <= ses.start + GRACE ? { k: "ok", t: "출석 (" + hhmm(f) + ")" }
+                                         : { k: "late", t: "지각 (" + hhmm(f) + ", " + Math.round((f - ses.start) / 60000) + "분 늦음)" };
+    if (now < ses.start) return { k: "wait", t: "예정" };
+    if (now < ses.start + GRACE) return { k: "wait", t: "아직 접속 전" };
+    if (now < ses.end) return { k: "absent", t: "미출석 (진행 중)" };
+    return { k: "absent", t: "결석" };
+  }
+  function slotText(sc) { return (sc.name ? sc.name + " · " : "") + hm(sc.start_time) + "~" + endText(sc); }
+  function loadStudyStarts(fromMs, toMs, uid, done) { // 공부 시작 기록 → 회원별 시각 목록
+    var q = window.sb.from("study_events").select("user_id,at").eq("kind", "study")
+      .gte("at", new Date(fromMs).toISOString()).lt("at", new Date(toMs).toISOString());
+    if (uid) q = q.eq("user_id", uid);
+    q.order("at").limit(5000).then(function (r) {
+      if (r.error) { done(null, r.error.message); return; }
+      var by = {}; (r.data || []).forEach(function (e) { (by[e.user_id] = by[e.user_id] || []).push(new Date(e.at).getTime()); });
+      done(by);
+    }, function (e) { done(null, String(e)); });
+  }
+  function attRow(box, left, res) {
+    var row = document.createElement("div"); row.className = "mrow";
+    var a = document.createElement("span"), b = document.createElement("b");
+    a.textContent = left; b.textContent = res.t; b.dataset.a = res.k;
+    row.append(a, b); box.append(row);
+  }
+  function renderStuAtt() { // 학생 관리 창: 통계와 같은 기간의 출석 기록
+    if (!stuId || !stData) return;
+    var uid = stuId, days = stData.days, list = $("ahList"), tiles = $("ahTiles");
+    list.textContent = ""; tiles.textContent = "";
+    if (!scheds) { $("ahMsg").textContent = "출석 체크 서버 설정(SQL)이 필요합니다."; return; }
+    var slots = scheds[uid] || [];
+    if (!slots.length) { $("ahMsg").textContent = "출석 시간이 정해져 있지 않습니다. 위 「출석 시간」에서 정하세요."; return; }
+    var d0 = new Date(days[0]); d0.setHours(0, 0, 0, 0);
+    var dn = new Date(days[days.length - 1]); dn.setHours(0, 0, 0, 0);
+    $("ahMsg").textContent = "불러오는 중…";
+    loadStudyStarts(d0.getTime() - 3 * 3600000, dn.getTime() + 2 * 86400000, uid, function (by, err) {
+      if (uid !== stuId) return;
+      if (!by) { $("ahMsg").textContent = "출석 기록을 불러오지 못했습니다: " + err; return; }
+      $("ahMsg").textContent = "";
+      var mine = by[uid] || [], cnt = { ok: 0, late: 0, absent: 0 }, rows = [];
+      days.forEach(function (d) {
+        sessionsOn(d, slots).forEach(function (ses) {
+          var res = judge(ses, mine);
+          if (res.k === "ok" || res.k === "late") cnt[res.k]++;
+          else if (res.t === "결석") cnt.absent++;
+          rows.push({ d: d, ses: ses, res: res });
+        });
+      });
+      var total = cnt.ok + cnt.late + cnt.absent;
+      [["출석", cnt.ok + "회"], ["지각", cnt.late + "회"], ["결석", cnt.absent + "회"],
+       ["출석률 (지각 포함)", total ? Math.round((cnt.ok + cnt.late) / total * 100) + "%" : "—"]].forEach(function (x) {
+        var t = document.createElement("div"); t.className = "tile2";
+        var b = document.createElement("b"), sp = document.createElement("span"); b.textContent = x[1]; sp.textContent = x[0];
+        t.append(b, sp); tiles.append(t);
+      });
+      if (!rows.length) { $("ahMsg").textContent = "이 기간에는 출석 예정이 없습니다."; return; }
+      rows.reverse().forEach(function (r) {
+        attRow(list, (r.d.getMonth() + 1) + "/" + r.d.getDate() + " (" + WD[r.d.getDay()] + ") · " + slotText(r.ses.sc), r.res);
+      });
+    });
+  }
+  function renderDayAtt(day) { // 하루 기록: 그날 출석 예정이던 회원의 출석 결과
+    var box = $("dayAtt"); box.textContent = "";
+    if (!scheds || !day) return;
+    var d = new Date(day + "T12:00:00"), rows = [];
+    Object.keys(scheds).forEach(function (uid) {
+      sessionsOn(d, scheds[uid]).forEach(function (ses) { rows.push({ uid: uid, ses: ses }); });
+    });
+    if (!rows.length) return;
+    var d0 = new Date(d); d0.setHours(0, 0, 0, 0);
+    loadStudyStarts(d0.getTime() - 3 * 3600000, d0.getTime() + 2 * 86400000, null, function (by) {
+      if ($("hDay").value !== day || !by) return;
+      box.textContent = "";
+      var h = document.createElement("p"); h.className = "sth"; h.textContent = "출석"; box.append(h);
+      rows.sort(function (a, b) { return a.ses.start - b.ses.start; }).forEach(function (r) {
+        attRow(box, (names[r.uid] || "(알 수 없는 회원)") + " · " + slotText(r.ses.sc), judge(r.ses, by[r.uid] || []));
+      });
+      var h2 = document.createElement("p"); h2.className = "sth"; h2.textContent = "공부 기록"; box.append(h2);
+    });
+  }
+
   // --- 학생 관리 창: 한 회원의 승인·비밀번호·출석 시간·통계를 한곳에서 ---
   function fillStu() {
     var p = null; members.forEach(function (m) { if (m.id === stuId) p = m; });
@@ -612,7 +717,7 @@
   function openStu(id) {
     stuId = id; $("uMsg").textContent = ""; fillStu();
     $("uStats").append($("statsPanel")); // 통계 칸을 이 창 안으로 옮겨 이 학생 것만 표시
-    fillWho(); $("stWho").value = id; renderStats();
+    fillWho(); $("stWho").value = id; renderStats(); renderStuAtt();
     $("stu").hidden = false;
   }
   function closeStu() {
@@ -627,6 +732,7 @@
     var day = $("hDay").value;
     if (!day) return;
     $("hMsg").textContent = "불러오는 중…";
+    renderDayAtt(day);
     window.sb.from("study_days").select("user_id,study_ms,away_ms,drowsy_ms,break_ms").eq("day", day)
       .order("study_ms", { ascending: false }).then(function (r) {
         var box = $("hist"); box.textContent = "";
@@ -694,7 +800,7 @@
         if (r.error) { $("stMsg").textContent = "통계를 불러오지 못했습니다: " + r.error.message; return; }
         var by = {};
         r.data.forEach(function (x) { (by[x.user_id] = by[x.user_id] || {})[x.day] = x; });
-        stData = { days: days, by: by }; fillWho(); renderStats();
+        stData = { days: days, by: by }; fillWho(); renderStats(); renderStuAtt();
       }, function (e) { $("stMsg").textContent = "통계를 불러오지 못했습니다: " + e; });
   }
   function fillWho() { // 사람 선택 목록: 전체 + 모든 회원 (이 기간에 기록이 없는 사람도 고를 수 있음)
@@ -818,9 +924,11 @@
   function todayAt(t) { var x = String(t).split(":"), d = new Date(); d.setHours(Number(x[0]), Number(x[1]), 0, 0); return d.getTime(); }
   function hhmm(ms) { return new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }); }
   function loadSched() {
-    window.sb.from("schedule_slots").select("id,user_id,name,days,start_time,end_time").order("start_time").then(function (r) {
+    window.sb.from("schedule_slots").select("id,user_id,name,days,start_time,end_time,created_at").order("start_time").then(function (r) {
       if (r.error || !r.data) { scheds = null; renderAtt(); return; }
       scheds = {}; r.data.forEach(function (x) { (scheds[x.user_id] = scheds[x.user_id] || []).push(x); });
+      if (stuId) renderStuAtt();
+      renderDayAtt($("hDay").value);
       if (!$("sched").hidden) renderSlots();
       loadArrivals();
     }, function () { scheds = null; renderAtt(); });
