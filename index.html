@@ -92,8 +92,8 @@
         <span class="msg" id="msg"></span>
       </div>
       <div class="row">
-        <button id="brkToilet" class="ghost" disabled>화장실 (10분)</button>
-        <button id="brkRest" class="ghost" disabled>식사·휴식 (40분)</button>
+        <button id="brkToilet" class="ghost" disabled>화장실 (<span id="limToilet">10</span>분)</button>
+        <button id="brkRest" class="ghost" disabled>식사·휴식 (<span id="limRest">40</span>분)</button>
         <button id="brkEnd" hidden>공부 재개</button>
       </div>
     </section>
@@ -184,8 +184,14 @@ function syncMark() { $("eyeMark").style.left = (cfg.thr * 100) + "%"; }
 bind("rAway", "oAway", "away", (v) => v + "초");
 bind("rDrowsy", "oDrowsy", "drowsy", (v) => v + "초");
 bind("rThr", "oThr", "thr", (v) => v.toFixed(2));
-function applyCfg(o) { // 관리자가 정한 감지 기준 적용
+const BREAK_LIMIT_MIN = { "화장실": 10, "식사·휴식": 40 };
+function applyCfg(o) { // 관리자가 정한 감지 기준·휴식 시간 적용
   if (!o) return;
+  for (const [key, label, el] of [["toilet", "화장실", "limToilet"], ["rest", "식사·휴식", "limRest"]]) {
+    const v = Number(o[key]);
+    if (!Number.isFinite(v) || v <= 0) continue;
+    BREAK_LIMIT_MIN[label] = v; $(el).textContent = v;
+  }
   for (const [key, id] of [["away", "rAway"], ["drowsy", "rDrowsy"], ["thr", "rThr"]]) {
     const v = Number(o[key]);
     if (!Number.isFinite(v) || v <= 0) continue;
@@ -329,7 +335,7 @@ function stopLink() {
 
 // --- 휴식 (화장실·식사) ---
 let onBreak = false, breakReason = "", breakLeft = false, goneSince = 0, breakStart = 0;
-const BREAK_LIMIT_MIN = { "화장실": 10, "식사·휴식": 40 }; // 휴식 종류별 제한 시간(분)
+// 휴식 종류별 제한 시간(분) — BREAK_LIMIT_MIN은 맨 위에 선언 (관리자 설정으로 바뀜)
 function breakButtons() {
   const running = !!timer;
   $("brkToilet").hidden = $("brkRest").hidden = onBreak;
@@ -410,7 +416,8 @@ async function initAccount() {
     } catch (e) { say2("변경 실패: " + (e && e.message ? e.message : e), true); }
     $("pwSave").disabled = false;
   });
-  applyCfg({ away: settings.away_sec, drowsy: settings.drowsy_sec, thr: settings.eye_thr });
+  applyCfg({ away: settings.away_sec, drowsy: settings.drowsy_sec, thr: settings.eye_thr,
+             toilet: settings.toilet_min, rest: settings.rest_min });
   try { // 오늘 이미 쌓인 시간이 있으면 이어서 누적
     const { data } = await window.sb.from("study_days").select("study_ms,away_ms,drowsy_ms,break_ms")
       .eq("user_id", profile.id).eq("day", dayKey).maybeSingle();
