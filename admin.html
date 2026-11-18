@@ -720,6 +720,28 @@
       });
     }
     add("출석 시간", true, function () { openSched(p.id, label); });
+    if (p.role !== "admin") {
+      add("기록 삭제", true, function (b) { // 공부 기록만 지우고 계정은 남김
+        if (!window.confirm(label + " 님의 공부 기록(날짜별 시간, 상태 변화, 출석 판정의 근거)을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
+        b.disabled = true; $("uMsg").textContent = "삭제 중…";
+        window.sb.rpc("admin_delete_records", { target: p.id }).then(function (x) {
+          b.disabled = false;
+          if (x.error) { $("uMsg").textContent = "삭제 실패: " + x.error.message + " (서버 설정 SQL을 실행했는지 확인하세요)"; return; }
+          $("uMsg").textContent = "공부 기록을 지웠습니다. 계정과 출석 시간은 남아 있습니다.";
+          loadStats(); loadHistory(); loadArrivals();
+        }, function (e) { b.disabled = false; $("uMsg").textContent = "삭제 실패: " + e; });
+      });
+      add("계정 삭제", true, function (b) { // 그만둔 학생: 계정과 모든 기록 삭제
+        if (!window.confirm(label + " 님의 계정과 모든 기록(공부 기록, 출석 시간, 동의 기록)을 지웁니다. 되돌릴 수 없고, 다시 이용하려면 새로 가입해야 합니다. 계속할까요?")) return;
+        b.disabled = true; $("uMsg").textContent = "삭제 중…";
+        window.sb.rpc("admin_delete_member", { target: p.id }).then(function (x) {
+          b.disabled = false;
+          if (x.error) { $("uMsg").textContent = "삭제 실패: " + x.error.message + " (서버 설정 SQL을 실행했는지 확인하세요)"; return; }
+          closeStu(); $("mMsg").textContent = label + " 님의 계정과 기록을 모두 지웠습니다.";
+          loadMembers(); loadSched();
+        }, function (e) { b.disabled = false; $("uMsg").textContent = "삭제 실패: " + e; });
+      });
+    }
   }
   function openStu(id) {
     stuId = id; $("uMsg").textContent = ""; fillStu();
