@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f2a2e">
+<link rel="apple-touch-icon" href="icon-apple-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="독서실">
+
 <title>독서실 모니터 프로토타입 — 자리비움·졸음 감지</title>
 <style>
   :root {
@@ -75,7 +82,7 @@
 <body>
 <div id="auth"></div>
 <main id="app" hidden>
-  <h1>독서실 모니터 프로토타입</h1>
+  <h1>독서실 모니터</h1>
   <p class="sub">캠으로 자리비움과 졸음을 감지합니다. 영상과 상태는 관리자 화면에만 전송됩니다.</p>
 
   <div class="grid">
@@ -592,5 +599,6 @@ function stopAll() {
 }
 $("stop").addEventListener("click", () => { stopAll(); say("중지됨"); });
 </script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});</script>
 </body>
 </html>

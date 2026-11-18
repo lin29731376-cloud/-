@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="admin.webmanifest">
+<meta name="theme-color" content="#1f2a2e">
+<link rel="apple-touch-icon" href="admin-icon-apple-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="독서실 관리">
+
 <title>독서실 모니터 — 관리자 화면</title>
 <style>
   :root {
@@ -1139,5 +1146,6 @@
   });
 })();
 </script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});</script>
 </body>
 </html>
