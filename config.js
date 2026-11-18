@@ -23,3 +23,15 @@ window.SM_TERMS = {
   effective: "",       // 시행일
 };
 window.SM_CONSENT_VERSION = "2026-11-15";
+
+// 아이디 로그인: 로그인 서버(Supabase)는 이메일 형식이 필요해서, 아이디 뒤에 아래 도메인을 붙여 내부적으로만 씀.
+// 실제로 메일이 가지 않는 주소이고, 화면에는 아이디만 보임.
+window.SM_ID_DOMAIN = "id.invalid";
+window.smLoginOf = function (input) { // 입력값 → 로그인용 주소 ('@'가 있으면 예전 이메일 계정으로 봄)
+  var v = String(input || "").trim().toLowerCase();
+  return v.indexOf("@") >= 0 ? v : v + "@" + window.SM_ID_DOMAIN;
+};
+window.smIdOf = function (email) { // 로그인용 주소 → 화면에 보일 아이디
+  var e = String(email || ""), suf = "@" + window.SM_ID_DOMAIN;
+  return e.slice(-suf.length) === suf ? e.slice(0, -suf.length) : e;
+};

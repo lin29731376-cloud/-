@@ -160,7 +160,7 @@
     <b style="flex:1">회원 관리</b>
     <button id="mReload" class="ghost">새로고침</button>
     <div class="mtools">
-      <input type="search" id="mSearch" placeholder="이름 또는 이메일로 검색" autocomplete="off" aria-label="회원 검색">
+      <input type="search" id="mSearch" placeholder="이름 또는 아이디로 검색" autocomplete="off" aria-label="회원 검색">
       <label class="mchk"><input type="checkbox" id="mPending"> 승인 대기만</label>
       <span class="msg" id="mCount"></span>
     </div>
@@ -560,7 +560,7 @@
       if (r.error) { $("members").textContent = ""; $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + r.error.message; return; }
       members = r.data || [];
       $("mMsg").textContent = members.length ? "" : "아직 가입한 회원이 없습니다.";
-      members.forEach(function (m) { names[m.id] = m.name || m.email || "(이름 없음)"; });
+      members.forEach(function (m) { names[m.id] = m.name || window.smIdOf(m.email) || "(이름 없음)"; });
       loadHistory(); // 이름을 알고 난 뒤에 기록 표시
       renderAtt(); loadStats();
       renderMembers();
@@ -586,7 +586,7 @@
     list.forEach(function (p) {
       var row = document.createElement("div"); row.className = "mrow";
       var who = document.createElement("span");
-      who.textContent = (p.name || "(이름 없음)") + " · " + (p.email || "") + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
+      who.textContent = (p.name || "(이름 없음)") + " · " + window.smIdOf(p.email) + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
       row.append(who);
       if (p.role === "pending") { // 자주 쓰는 승인은 목록에서 바로
         var ab = document.createElement("button"); ab.type = "button"; ab.textContent = "승인";
@@ -702,9 +702,9 @@
   function fillStu() {
     var p = null; members.forEach(function (m) { if (m.id === stuId) p = m; });
     if (!p) { closeStu(); return; }
-    var label = p.name || p.email || "회원";
+    var label = p.name || window.smIdOf(p.email) || "회원";
     $("uName").textContent = label + " — 학생 관리";
-    $("uInfo").textContent = (p.email || "") + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
+    $("uInfo").textContent = "아이디 " + window.smIdOf(p.email) + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
     var acts = $("uActs"); acts.textContent = "";
     var add = function (text, ghost, fn) {
       var b = document.createElement("button"); b.type = "button"; b.textContent = text; if (ghost) b.className = "ghost";

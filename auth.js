@@ -24,11 +24,16 @@
   function logout() { sb.auth.signOut().then(function () { location.reload(); }, function () { location.reload(); }); }
 
   var ERR = {
-    "Invalid login credentials": "이메일 또는 비밀번호가 맞지 않습니다.",
+    "Invalid login credentials": "아이디 또는 비밀번호가 맞지 않습니다.",
     "Email not confirmed": "이메일 확인이 끝나지 않았습니다. 받은 메일의 링크를 눌러주세요.",
-    "User already registered": "이미 가입된 이메일입니다. 로그인해 주세요.",
+    "User already registered": "이미 사용 중인 아이디입니다. 다른 아이디를 쓰거나 로그인해 주세요.",
   };
-  function explain(e) { var m = (e && e.message) || String(e); return ERR[m] || ("오류: " + m); }
+  function explain(e) {
+    var m = (e && e.message) || String(e);
+    if (ERR[m]) return ERR[m];
+    if (/email/i.test(m) && /invalid/i.test(m)) return "로그인 서버가 아이디 형식을 받아주지 않았습니다. 운영자에게 이 문구를 알려주세요. (" + m + ")";
+    return "오류: " + m;
+  }
 
   var mode = "login";
   function showForm(note, isErr) {
@@ -36,7 +41,8 @@
     card('<p class="sub">' + (signup ? "회원가입 — 가입 후 관리자 승인이 필요합니다." : "로그인") + "</p>" +
       '<form id="aForm">' +
       (signup ? '<label>이름 <input type="text" id="aName" maxlength="20" autocomplete="name" required></label>' : "") +
-      '<label>이메일 <input type="email" id="aEmail" autocomplete="email" required></label>' +
+      '<label>아이디' + (signup ? ' (영문 소문자·숫자·_ 4~20자)' : '') +
+      ' <input type="text" id="aEmail" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>' +
       '<label>비밀번호 (6자 이상) <input type="password" id="aPw" minlength="6" autocomplete="' + (signup ? "new-password" : "current-password") + '" required></label>' +
       '<button type="submit" id="aGo">' + (signup ? "가입하기" : "로그인") + "</button></form>" +
       '<button type="button" class="ghost" id="aSwitch">' + (signup ? "이미 계정이 있어요 — 로그인" : "처음이에요 — 회원가입") + "</button>" +
@@ -45,7 +51,11 @@
     q("aSwitch").addEventListener("click", function () { mode = signup ? "login" : "signup"; showForm(); });
     q("aForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
-      var email = q("aEmail").value.trim(), pw = q("aPw").value;
+      var raw = q("aEmail").value.trim(), pw = q("aPw").value;
+      if (signup && !/^[a-z0-9_]{4,20}$/.test(raw.toLowerCase())) {
+        q("aGo").disabled = false; msg("아이디는 영문 소문자, 숫자, 밑줄(_)로 4~20자여야 합니다.", true); return;
+      }
+      var email = window.smLoginOf(raw);
       q("aGo").disabled = true; msg("처리 중…");
       var done = function (r) {
         q("aGo") && (q("aGo").disabled = false);

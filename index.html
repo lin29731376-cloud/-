@@ -412,9 +412,9 @@ function saveEvent(kind) { // 상태 변화 기록
 }
 async function initAccount() {
   const { profile, settings, logout } = window.smAuth;
-  $("who").value = profile.name || profile.email || "이름 미입력";
+  $("who").value = profile.name || window.smIdOf(profile.email) || "이름 미입력";
   $("topic").value = settings.ntfy_topic || ""; $("room").value = settings.room_code || "";
-  $("meName").textContent = $("who").value; $("meEmail").textContent = profile.email || "";
+  $("meName").textContent = $("who").value; $("meEmail").textContent = "아이디 " + window.smIdOf(profile.email);
   $("logout").addEventListener("click", () => { saveTotals(); logout(); });
   $("pwSave").addEventListener("click", async () => { // 내 비밀번호 변경
     const pw = $("newPw").value, say2 = (t, err) => { $("pwMsg").textContent = t; $("pwMsg").classList.toggle("err", !!err); };
