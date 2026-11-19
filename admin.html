@@ -78,6 +78,20 @@
   .mtools input[type=search] { flex: 1 1 220px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px;
     font: inherit; background: #fff; color: var(--ink); }
   .mchk { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+  .tabs { display: flex; gap: 6px; margin: 0 0 14px; }
+  .tabs button { flex: 1; position: relative; padding: 10px 4px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); font-weight: 600; }
+  .tabs button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .tbadge { position: absolute; top: -6px; right: 6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+    background: var(--drowsy); color: #fff; font-size: 12px; line-height: 20px; }
+  [data-pane][hidden] { display: none !important; }
+  @media (max-width: 760px) {
+    main { padding-bottom: 96px; }
+    .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; margin: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+      background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -2px 10px rgba(0,0,0,.06); }
+    .tabs button { border: 0; font-size: 14px; }
+    .grid { grid-template-columns: 1fr; }
+  }
   .mlist { flex-basis: 100%; max-height: 420px; overflow-y: auto; }
   .box.wide { width: min(900px, 100%); }
   #sched { z-index: 12; } /* 학생 관리 창 위에 뜨도록 */
@@ -138,6 +152,13 @@
 <body>
 <div id="auth"></div>
 <main id="app" hidden>
+  <nav class="tabs" id="tabs" aria-label="관리자 메뉴">
+    <button type="button" data-tab="mon" aria-pressed="true">모니터링<span class="tbadge" id="tbMon" hidden></span></button>
+    <button type="button" data-tab="att" aria-pressed="false">출석</button>
+    <button type="button" data-tab="mem" aria-pressed="false">학생<span class="tbadge" id="tbMem" hidden></span></button>
+    <button type="button" data-tab="rec" aria-pressed="false">기록</button>
+    <button type="button" data-tab="set" aria-pressed="false">설정</button>
+  </nav>
   <h1>관리자 화면</h1>
   <p class="sub">승인된 학생들의 영상과 상태가 실시간으로 표시됩니다. 화면은 2초마다 한 장씩 이 기기에만 기록되며, 이 페이지를 닫거나 새로고침하면 지워집니다.</p>
 
@@ -323,7 +344,9 @@
     tiles.forEach(function (t) { if (t.state !== "off") c.all++; if (c[t.state] !== undefined) c[t.state]++; });
     $("cAll").textContent = c.all; $("cStudy").textContent = c.study;
     $("cAway").textContent = c.away; $("cDrowsy").textContent = c.drowsy; $("cBreak").textContent = c.break;
-    $("empty").hidden = tiles.size > 0;
+    if (!$("grid").hidden) $("empty").hidden = tiles.size > 0; // 다른 탭을 보고 있으면 건드리지 않음
+    var warn = c.away + c.drowsy;
+    $("tbMon").hidden = !warn; $("tbMon").textContent = warn;
   }
   function getTile(id) {
     var t = tiles.get(id); if (t) return t;
@@ -536,6 +559,37 @@
     }, function () { lkNote("영상 서버 입장권을 받지 못했습니다. 10초 후 다시 시도합니다."); setTimeout(startLkAdmin, 10000); });
   }
 
+  // --- 탭: 화면을 모니터링·출석·학생·기록·설정으로 나눠 보여줌 ---
+  (function () {
+    var bar = function (el) { return el && el.closest ? el.closest(".bar") : null; };
+    var panes = {
+      mon: [bar($("go")), $("summary"), $("grid"), $("empty")],
+      att: [bar($("att"))],
+      mem: [bar($("members"))],
+      rec: [bar($("hist"))],
+      set: [bar($("rAway"))],
+    };
+    Object.keys(panes).forEach(function (k) { panes[k].forEach(function (el) { if (el) el.setAttribute("data-pane", k); }); });
+    var subtitle = document.querySelector("main > .sub");
+    function show(k) {
+      Object.keys(panes).forEach(function (n) { panes[n].forEach(function (el) {
+        if (!el) return;
+        if (n !== k) el.hidden = true;
+        else if (el.id !== "summary" && el.id !== "empty") el.hidden = false; // 요약·빈 안내는 원래 규칙대로
+        else if (el.id === "summary") el.hidden = !running;
+        else el.hidden = tiles.size > 0;
+      }); });
+      if (subtitle) subtitle.hidden = k !== "mon";
+      document.querySelectorAll("#tabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.tab === k)); });
+      try { localStorage.setItem("sm_tab", k); } catch (e) {}
+      window.scrollTo(0, 0);
+    }
+    document.querySelectorAll("#tabs button").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.tab); }); });
+    var start = "mon"; try { start = localStorage.getItem("sm_tab") || "mon"; } catch (e) {}
+    window.smShowTab = show;
+    setTimeout(function () { show(panes[start] ? start : "mon"); }, 0);
+  })();
+
   // --- 로그인 · 회원 관리 ---
   var names = {}; // 회원 id → 이름
   var ROLE_TEXT = { pending: "승인 대기", student: "학생", admin: "관리자" };
@@ -581,6 +635,7 @@
       return !q || (p.name || "").toLowerCase().indexOf(q) >= 0 || (p.email || "").toLowerCase().indexOf(q) >= 0;
     });
     var pend = members.filter(function (p) { return p.role === "pending"; }).length;
+    $("tbMem").hidden = !pend; $("tbMem").textContent = pend;
     $("mCount").textContent = "전체 " + members.length + "명 · 표시 " + list.length + "명" + (pend ? " · 승인 대기 " + pend + "명" : "");
     if (members.length && !list.length) { box.append(document.createTextNode("조건에 맞는 회원이 없습니다.")); return; }
     list.forEach(function (p) {
@@ -1141,7 +1196,7 @@
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
     $("go").disabled = true; running = true;
     say("관리 중 — 학생 접속을 기다립니다. 이 화면을 닫으면 관리가 중단됩니다.");
-    $("summary").hidden = false; summarize(); keepAwake();
+    if ($("grid").hidden === false) $("summary").hidden = false; summarize(); keepAwake();
     startLkAdmin();
   });
 })();
