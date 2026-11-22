@@ -160,7 +160,7 @@
     <button type="button" data-tab="set" aria-pressed="false">설정</button>
   </nav>
   <h1>관리자 화면</h1>
-  <p class="sub">승인된 학생들의 영상과 상태가 실시간으로 표시됩니다. 화면은 2초마다 한 장씩 이 기기에만 기록되며, 이 페이지를 닫거나 새로고침하면 지워집니다.</p>
+  <p class="sub">승인된 학생들의 영상과 상태가 실시간으로 표시됩니다. 화면은 2초마다 한 장씩 이 기기에 저장되며, 기록 탭에서 직접 지울 때까지 남습니다.</p>
 
   <div class="bar">
     <input type="hidden" id="topic">
@@ -214,6 +214,14 @@
     <span class="msg" id="hMsg"></span>
   </div>
 
+  <div class="bar" id="recBar" style="margin-top:12px">
+    <b style="flex:1">저장된 화면 기록</b>
+    <button id="recReload" class="ghost">새로고침</button>
+    <p class="msg" style="flex-basis:100%;margin:0">2초마다 남긴 화면은 이 기기에 보관됩니다. 학생이 종료하거나 이 화면을 닫아도 남아 있고, 직접 지울 때까지 보관됩니다.</p>
+    <div id="recList" style="flex-basis:100%"></div>
+    <span class="msg" id="recMsg"></span>
+  </div>
+
   <div id="statsHome" hidden>
   <div class="bar" id="statsPanel" style="margin-top:12px">
     <b style="flex:1">통계</b>
@@ -251,6 +259,7 @@
     </div>
     <div class="prow">
       <button id="pDelSeen" class="ghost">본 장면 지우기</button>
+      <button id="pDelAll" class="ghost">이 학생 화면 기록 모두 지우기</button>
       <span class="msg" id="pSeenInfo"></span>
     </div>
     <p class="ptitle">알림이 뜬 시각 — 누르면 그 20초 전으로 이동합니다</p>
@@ -387,10 +396,9 @@
       t.who = who; t.name.textContent = who;
       tiles.forEach(function (o, oid) { // 같은 이름으로 다시 접속하면 끊긴 옛 타일 정리
         if (oid !== id && o.who === who && (o.state === "off" || o.state === "lost")) {
-          t.frames = o.frames.concat(t.frames); t.events = o.events.concat(t.events); // 기록은 이어받음
+          t.events = o.events.concat(t.events); // 알림 기록은 이어받음 (화면은 이 기기 저장소에 남아 있음)
           t.since = Math.min(t.since, o.since); t.wakes += o.wakes;
-          if (cur === o) cur = t;
-          o.el.remove(); tiles.delete(oid);
+            o.el.remove(); tiles.delete(oid);
         }
       });
     }
@@ -405,21 +413,75 @@
     tiles.forEach(function (t) { if (t.state !== "off" && t.state !== "lost" && now - t.last > 8000) setTileState(t, "lost"); });
   }, 2000);
 
-  // --- 녹화: 학생별로 2초마다 화면 한 장을 이 브라우저 메모리에 보관 ---
-  var MAX_FRAMES = 7200; // 학생당 약 4시간
+  // --- 녹화: 학생별로 2초마다 화면 한 장을 이 기기(IndexedDB)에 보관. 관리자가 지울 때까지 남음 ---
+  var recDb = null, recFull = false;
+  function idb() {
+    if (recDb) return Promise.resolve(recDb);
+    return new Promise(function (res, rej) {
+      var rq = indexedDB.open("sm_rec", 1);
+      rq.onupgradeneeded = function () {
+        var st = rq.result.createObjectStore("frames", { keyPath: "id", autoIncrement: true });
+        st.createIndex("uid", "uid");
+      };
+      rq.onsuccess = function () { recDb = rq.result; res(recDb); };
+      rq.onerror = function () { rej(rq.error); };
+    });
+  }
+  function idbAll(uid) { // 그 학생의 장면 전부 (시간순)
+    return idb().then(function (db) { return new Promise(function (res, rej) {
+      var rq = db.transaction("frames").objectStore("frames").index("uid").getAll(uid);
+      rq.onsuccess = function () { res((rq.result || []).sort(function (x, y) { return x.t - y.t; })); };
+      rq.onerror = function () { rej(rq.error); };
+    }); });
+  }
+  function idbDelete(ids) {
+    return idb().then(function (db) { return new Promise(function (res, rej) {
+      var tx = db.transaction("frames", "readwrite"), st = tx.objectStore("frames");
+      ids.forEach(function (id) { st.delete(id); });
+      tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+    }); });
+  }
+  function idbSummary() { // 학생별 장수·처음·마지막 시각 (사진은 읽지 않음)
+    return idb().then(function (db) { return new Promise(function (res, rej) {
+      var out = {}, rq = db.transaction("frames").objectStore("frames").openCursor();
+      rq.onsuccess = function () {
+        var c = rq.result; if (!c) { res(out); return; }
+        var v = c.value, o = out[v.uid] = out[v.uid] || { n: 0, a: v.t, z: v.t, name: v.name };
+        o.n++; o.a = Math.min(o.a, v.t); o.z = Math.max(o.z, v.t); if (v.name) o.name = v.name;
+        c.continue();
+      };
+      rq.onerror = function () { rej(rq.error); };
+    }); });
+  }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {} // 브라우저가 임의로 지우지 않게 요청
+  function checkSpace() { // 저장 공간이 거의 차면 새로 남기지 않음
+    try {
+      navigator.storage.estimate().then(function (e) {
+        recFull = e.quota && e.usage / e.quota > 0.9;
+        if (recFull) $("recMsg").textContent = "기기 저장 공간이 거의 찼습니다. 화면 기록을 지워야 새로 남길 수 있습니다.";
+      });
+    } catch (e) {}
+  }
+  checkSpace(); setInterval(checkSpace, 60000);
   var canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
   setInterval(function () {
-    tiles.forEach(function (t) {
-      var v = t.video;
+    if (recFull) return;
+    tiles.forEach(function (t, key) {
+      var v = t.video, uid = String(key).replace(/^lk:stu-/, "");
       if (!v.videoWidth || t.state === "off" || t.state === "lost") return;
       canvas.width = 320; canvas.height = Math.round(320 * v.videoHeight / v.videoWidth);
       try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
       var at = Date.now();
       canvas.toBlob(function (b) {
         if (!b) return;
-        t.frames.push({ t: at, b: b });
-        if (t.frames.length > MAX_FRAMES) t.frames.shift();
-        if (cur === t) syncSeek();
+        var row = { uid: uid, name: t.who || names[uid] || "", t: at, b: b };
+        idb().then(function (db) {
+          var rq = db.transaction("frames", "readwrite").objectStore("frames").add(row);
+          rq.onsuccess = function () {
+            row.id = rq.result;
+            if (cur && cur.uid === uid) { cur.frames.push(row); syncSeek(); } // 보고 있는 중이면 바로 이어 붙임
+          };
+        }).catch(function () {});
       }, "image/jpeg", 0.5);
     });
   }, 2000);
@@ -455,6 +517,8 @@
     stopPlay();
     var keep = cur.frames.filter(function (f) { return !f.seen; }), gone = cur.frames.length - keep.length;
     if (!gone) return;
+    idbDelete(cur.frames.filter(function (f) { return f.seen; }).map(function (f) { return f.id; }))
+      .then(function () { loadRecList(); checkSpace(); }, function (e) { $("pSeenInfo").textContent = "지우기 실패: " + e; });
     cur.frames = keep;
     syncSeek(); seenInfo();
     if (keep.length) showFrame(Math.min(pos, keep.length - 1));
@@ -478,13 +542,68 @@
       box.append(b);
     });
   }
-  function openPlayer(t) {
-    cur = t; stopPlay();
-    $("pName").textContent = (t.who || "학생") + " — 기록 보기";
-    $("pImg").removeAttribute("src"); $("pTime").textContent = "—";
-    syncSeek(); renderEvents(); showFrame(t.frames.length - 1);
-    seenInfo(); $("player").hidden = false;
+  function openPlayer(t) { // 모니터링 칸의 「기록 보기」
+    var key = null; tiles.forEach(function (o, k) { if (o === t) key = k; });
+    openStored(String(key || "").replace(/^lk:stu-/, ""), t.who, t.events);
   }
+  function openStored(uid, name, liveEvents) { // 이 기기에 저장된 그 학생의 화면 기록 열기
+    stopPlay();
+    cur = { uid: uid, who: name || names[uid] || "학생", frames: [], events: [] };
+    $("pName").textContent = cur.who + " — 화면 기록";
+    $("pImg").removeAttribute("src"); $("pTime").textContent = "—"; $("pEvents").textContent = "불러오는 중…";
+    syncSeek(); seenInfo(); $("player").hidden = false;
+    var me = cur;
+    idbAll(uid).then(function (rows) {
+      if (cur !== me) return;
+      me.frames = rows.concat(me.frames.filter(function (f) { return !rows.some(function (r) { return r.id === f.id; }); }));
+      syncSeek(); showFrame(me.frames.length - 1); seenInfo();
+      // 알림 시각: 서버에 남은 상태 변화 기록 + 지금 화면에서 생긴 응답 없음
+      var a = me.frames.length ? me.frames[0].t : Date.now(), z = Date.now();
+      window.sb.from("study_events").select("kind,at").eq("user_id", uid)
+        .gte("at", new Date(a - 60000).toISOString()).lt("at", new Date(z).toISOString()).order("at").limit(1000).then(function (r) {
+          if (cur !== me) return;
+          var ev = ((r && r.data) || []).map(function (e) { return { t: new Date(e.at).getTime(), s: e.kind }; });
+          (liveEvents || []).forEach(function (e) { if (e.s === "lost") ev.push(e); });
+          me.events = ev.sort(function (x, y) { return x.t - y.t; }); renderEvents();
+        }, function () { if (cur === me) { me.events = liveEvents || []; renderEvents(); } });
+    }, function (e) { $("pInfo").textContent = "화면 기록을 불러오지 못했습니다: " + e; });
+  }
+  $("pDelAll").addEventListener("click", function () {
+    if (!cur || !cur.frames.length) return;
+    if (!window.confirm(cur.who + " 님의 저장된 화면 기록 " + cur.frames.length + "장을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
+    stopPlay();
+    var me = cur;
+    idbAll(me.uid).then(function (rows) { return idbDelete(rows.map(function (r) { return r.id; })); }).then(function () {
+      if (cur !== me) return;
+      me.frames = []; syncSeek(); seenInfo();
+      if (curUrl) URL.revokeObjectURL(curUrl); curUrl = null; $("pImg").removeAttribute("src"); $("pTime").textContent = "—";
+      $("pSeenInfo").textContent = "모두 지웠습니다."; loadRecList(); checkSpace();
+    }, function (e) { $("pSeenInfo").textContent = "지우기 실패: " + e; });
+  });
+
+  // --- 기록 탭: 저장된 화면 기록 목록 ---
+  function mb(n) { return n >= 1e9 ? (n / 1e9).toFixed(1) + "GB" : Math.round(n / 1e6) + "MB"; }
+  function loadRecList() {
+    var box = $("recList");
+    idbSummary().then(function (sum) {
+      box.textContent = "";
+      var ids = Object.keys(sum).sort(function (a, b) { return sum[b].z - sum[a].z; });
+      $("recMsg").textContent = ids.length ? "" : "저장된 화면 기록이 없습니다.";
+      ids.forEach(function (uid) {
+        var o = sum[uid], d1 = new Date(o.a), d2 = new Date(o.z);
+        var day = function (d) { return (d.getMonth() + 1) + "/" + d.getDate() + " " + clock(d.getTime()).slice(0, 5); };
+        var row = document.createElement("div"); row.className = "mrow";
+        var txt = document.createElement("span");
+        txt.textContent = (names[uid] || o.name || "(알 수 없는 회원)") + " · " + o.n + "장 · " + day(d1) + " ~ " + day(d2);
+        var vb = document.createElement("button"); vb.type = "button"; vb.className = "ghost"; vb.textContent = "보기";
+        vb.addEventListener("click", function () { openStored(uid, names[uid] || o.name); });
+        row.append(txt, vb); box.append(row);
+      });
+      try { navigator.storage.estimate().then(function (e) { if (ids.length && !recFull) $("recMsg").textContent = "이 기기에서 쓰는 공간 약 " + mb(e.usage) + (e.quota ? " / 쓸 수 있는 공간 약 " + mb(e.quota) : ""); }); } catch (e) {}
+    }, function (e) { $("recMsg").textContent = "화면 기록 목록을 불러오지 못했습니다: " + e; });
+  }
+  $("recReload").addEventListener("click", loadRecList);
+  setTimeout(loadRecList, 500);
   $("pClose").addEventListener("click", function () { stopPlay(); cur = null; $("player").hidden = true; });
   $("pSeek").addEventListener("input", function () { stopPlay(); showFrame(Number($("pSeek").value)); });
   $("pLast").addEventListener("click", function () { stopPlay(); if (cur) showFrame(cur.frames.length - 1); });
@@ -588,7 +707,7 @@
       mon: [bar($("go")), $("summary"), $("grid"), $("empty")],
       att: [bar($("att"))],
       mem: [bar($("members"))],
-      rec: [bar($("hist"))],
+      rec: [bar($("hist")), $("recBar")],
       set: [bar($("rAway"))],
     };
     Object.keys(panes).forEach(function (k) { panes[k].forEach(function (el) { if (el) el.setAttribute("data-pane", k); }); });
