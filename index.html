@@ -610,7 +610,7 @@ document.addEventListener("visibilitychange", () => {
   if (!timer) return;
   if (document.visibilityState === "hidden") { // 공부 중 앱을 내리거나 다른 앱을 켜면 바로 기록·알림
     if (onBreak) return;
-    leftAt = Date.now(); why = "앱 나감";
+    leftAt = Date.now(); why = "앱 나감·폰 사용 의심";
     setState("away"); sendStatus();
   } else {
     if (leftAt) { addLog(`앱으로 돌아옴 (${Math.round((Date.now() - leftAt) / 1000)}초 나가 있었음)`); leftAt = 0; }

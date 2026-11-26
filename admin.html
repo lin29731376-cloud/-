@@ -425,8 +425,10 @@
     var tot = d.total || {}; t.tot = tot;
     t.times.textContent = "공부 " + fmt(tot.study) + " · 자리비움 " + fmt(tot.away) + " · 졸음 " + fmt(tot.drowsy) + " · 휴식 " + fmt(tot.break);
     setTileState(t, LABEL[d.state] ? d.state : "idle");
+    t.leftApp = d.state === "away" && /앱 나감/.test(String(d.reason || "")); // 학생이 앱을 나감 = 폰을 다른 데 씀
+    if (t.leftApp && !t.leftAt) t.leftAt = Date.now(); if (!t.leftApp) t.leftAt = 0;
     if ((d.state === "break" || d.state === "away" || d.state === "drowsy") && d.reason)
-      t.badge.textContent = LABEL[d.state] + " · " + String(d.reason).slice(0, 10);
+      t.badge.textContent = LABEL[d.state] + " · " + String(d.reason).slice(0, 14);
   }
 
   setInterval(function () { // 학생 쪽 화면이 꺼지거나 페이지를 닫으면 '응답 없음'
@@ -498,13 +500,30 @@
     if (recFull) { recStatus(); return; }
     tiles.forEach(function (t, key) {
       var v = t.video, uid = String(key).replace(/^lk:stu-/, "");
-      if (!v.videoWidth || t.state === "off" || t.state === "lost") return;
+      // 앱을 나간 동안에는 학생 영상이 멈추지만, 돌아올 때까지 '폰 사용 의심' 화면으로 계속 기록 (최대 6시간)
+      var phone = t.leftApp && t.leftAt && Date.now() - t.leftAt < 6 * 3600000;
+      if (!phone && (!v.videoWidth || t.state === "off" || t.state === "lost")) return;
       rec.who++;
       if (v.paused) { try { v.play().catch(function () {}); } catch (e) {} }
-      canvas.width = 320; canvas.height = Math.round(320 * v.videoHeight / v.videoWidth);
-      try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
+      canvas.width = 320; canvas.height = v.videoWidth ? Math.round(320 * v.videoHeight / v.videoWidth) : 240;
       var at = Date.now(), st = t.state;
-      if (st !== "study") { // 공부 중이 아니면 화면에 상태를 찍어 둠 (테두리 + 상단 띠)
+      if (phone) {
+        ctx.fillStyle = "#1e2a44"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        try { if (v.videoWidth) { ctx.globalAlpha = 0.35; ctx.drawImage(v, 0, 0, canvas.width, canvas.height); ctx.globalAlpha = 1; } } catch (e) { ctx.globalAlpha = 1; }
+        var col2 = ST_COLOR.away, mins = Math.floor((at - t.leftAt) / 60000), secs = Math.floor((at - t.leftAt) / 1000) % 60;
+        ctx.lineWidth = 8; ctx.strokeStyle = col2; ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+        ctx.fillStyle = col2; ctx.fillRect(0, 0, canvas.width, 30);
+        ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+        ctx.font = "bold 17px sans-serif"; ctx.fillText("자리비움  " + clock(at), 10, 16);
+        ctx.textAlign = "center"; ctx.font = "bold 22px sans-serif";
+        ctx.fillText("📱 앱 나감 · 폰 사용 의심", canvas.width / 2, canvas.height / 2);
+        ctx.font = "16px sans-serif";
+        ctx.fillText("나간 지 " + mins + "분 " + secs + "초 (카메라 꺼짐)", canvas.width / 2, canvas.height / 2 + 30);
+        ctx.textAlign = "left"; st = "away";
+      } else {
+        try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
+      }
+      if (st !== "study" && !phone) { // 공부 중이 아니면 화면에 상태를 찍어 둠 (테두리 + 상단 띠)
         var col = ST_COLOR[st] || "#6b7280", label = (t.badge && t.badge.textContent) || LABEL[st] || st;
         ctx.lineWidth = 8; ctx.strokeStyle = col; ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
         ctx.fillStyle = col; ctx.fillRect(0, 0, canvas.width, 30);
