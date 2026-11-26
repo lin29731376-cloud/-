@@ -35,3 +35,19 @@ window.smIdOf = function (email) { // 로그인용 주소 → 화면에 보일 �
   var e = String(email || ""), suf = "@" + window.SM_ID_DOMAIN;
   return e.slice(-suf.length) === suf ? e.slice(0, -suf.length) : e;
 };
+
+// 앱 업데이트: 저장해 둔 화면 파일을 지우고 서버에서 새로 받아 다시 연다
+window.smUpdate = async function (btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "업데이트 중…"; }
+  try {
+    var files = ["./", "./index.html", "./admin.html", "./terms.html", "./config.js", "./auth.js", "./sw.js",
+                 "./manifest.webmanifest", "./admin.webmanifest"];
+    await Promise.all(files.map(function (f) { return fetch(f, { cache: "reload" }).catch(function () {}); }));
+    if (window.caches) { var ks = await caches.keys(); await Promise.all(ks.map(function (k) { return caches.delete(k); })); }
+    if (navigator.serviceWorker) {
+      var regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(function (r) { return r.unregister(); }));
+    }
+  } catch (e) { /* 실패해도 새로고침은 함 */ }
+  location.reload();
+};
