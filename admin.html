@@ -86,6 +86,7 @@
   .tbadge { position: absolute; top: -6px; right: 6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
     background: var(--drowsy); color: #fff; font-size: 12px; line-height: 20px; }
   [data-pane][hidden] { display: none !important; }
+  #grid.offscreen { position: fixed !important; left: -10000px; top: 0; width: 900px; pointer-events: none; } /* 다른 탭에서도 영상이 계속 돌아 기록되게 */
   @media (max-width: 760px) {
     main { padding-bottom: 96px; }
     .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9; margin: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
@@ -233,7 +234,9 @@
   <div class="bar" id="recBar" style="margin-top:12px">
     <b style="flex:1">저장된 화면 기록</b>
     <button id="recReload" class="ghost">새로고침</button>
-    <p class="msg" style="flex-basis:100%;margin:0">2초마다 남긴 화면은 이 기기에 보관됩니다. 학생이 종료하거나 이 화면을 닫아도 남아 있고, 직접 지울 때까지 보관됩니다.</p>
+    <p class="msg" style="flex-basis:100%;margin:0">2초마다 남긴 화면은 이 기기에 보관됩니다. 학생이 종료하거나 이 화면을 닫아도 남아 있고, 직접 지울 때까지 보관됩니다.
+      <b>기록은 이 관리자 앱이 켜져 있고 화면이 켜져 있는 동안에만 남습니다.</b></p>
+    <p class="msg" id="recLive" style="flex-basis:100%;margin:4px 0 0"></p>
     <div id="recList" style="flex-basis:100%"></div>
     <span class="msg" id="recMsg"></span>
   </div>
@@ -481,11 +484,22 @@
   }
   checkSpace(); setInterval(checkSpace, 60000);
   var canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+  var rec = { n: 0, last: 0, err: "", who: 0 };
+  function recStatus() {
+    var el = $("recLive"); if (!el) return;
+    if (recFull) { el.textContent = "기록 멈춤: 기기 저장 공간이 거의 찼습니다."; return; }
+    if (rec.err) { el.textContent = "기록 실패: " + rec.err; return; }
+    if (!rec.who) { el.textContent = "지금 기록 중인 학생 없음 (학생이 「공부 시작」을 눌러 영상이 연결되면 자동으로 기록됩니다)"; return; }
+    el.textContent = "지금 기록 중: 학생 " + rec.who + "명 · 이번에 저장한 화면 " + rec.n + "장" + (rec.last ? " · 마지막 " + clock(rec.last) : "");
+  }
   setInterval(function () {
-    if (recFull) return;
+    rec.who = 0;
+    if (recFull) { recStatus(); return; }
     tiles.forEach(function (t, key) {
       var v = t.video, uid = String(key).replace(/^lk:stu-/, "");
       if (!v.videoWidth || t.state === "off" || t.state === "lost") return;
+      rec.who++;
+      if (v.paused) { try { v.play().catch(function () {}); } catch (e) {} }
       canvas.width = 320; canvas.height = Math.round(320 * v.videoHeight / v.videoWidth);
       try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
       var at = Date.now();
@@ -494,14 +508,23 @@
         var row = { uid: uid, name: t.who || names[uid] || "", t: at, b: b };
         idb().then(function (db) {
           var rq = db.transaction("frames", "readwrite").objectStore("frames").add(row);
+          rq.onerror = function () { rec.err = String(rq.error && (rq.error.name + ": " + rq.error.message) || "저장 오류"); recStatus(); };
           rq.onsuccess = function () {
-            row.id = rq.result;
+            row.id = rq.result; rec.n++; rec.last = at; rec.err = "";
             if (cur && cur.uid === uid) { cur.frames.push(row); syncSeek(); } // 보고 있는 중이면 바로 이어 붙임
           };
-        }).catch(function () {});
+        }).catch(function (e) { rec.err = "저장소를 열지 못했습니다 (" + (e && (e.name || e.message) || e) + ")"; recStatus(); });
       }, "image/jpeg", 0.5);
     });
+    recStatus();
   }, 2000);
+  // 관리자 화면이 자동으로 꺼지면 기록이 멈추므로, 켜져 있는 동안 화면 꺼짐을 막음
+  var adminLock = null;
+  function adminAwake() {
+    try { if ("wakeLock" in navigator && document.visibilityState === "visible" && !adminLock)
+      navigator.wakeLock.request("screen").then(function (l) { adminLock = l; l.addEventListener("release", function () { adminLock = null; }); }, function () {}); } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", adminAwake); document.addEventListener("click", adminAwake, { once: true }); adminAwake();
 
   // --- 재생기 ---
   var cur = null, curUrl = null, playTimer = null, pos = 0;
@@ -732,6 +755,7 @@
     function show(k) {
       Object.keys(panes).forEach(function (n) { panes[n].forEach(function (el) {
         if (!el) return;
+        if (el.id === "grid") { el.hidden = false; el.classList.toggle("offscreen", n !== k); return; }
         if (n !== k) el.hidden = true;
         else if (el.id !== "summary" && el.id !== "empty") el.hidden = false; // 요약·빈 안내는 원래 규칙대로
         else if (el.id === "summary") el.hidden = !running;
@@ -740,6 +764,7 @@
       if (subtitle) subtitle.hidden = k !== "mon";
       document.querySelectorAll("#tabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.tab === k)); });
       try { localStorage.setItem("sm_tab", k); } catch (e) {}
+      if (k === "rec") { try { loadRecList(); } catch (e) {} }
       window.scrollTo(0, 0);
     }
     document.querySelectorAll("#tabs button").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.tab); }); });
