@@ -174,6 +174,7 @@
     <button type="button" data-tab="mon" aria-pressed="true">모니터링<span class="tbadge" id="tbMon" hidden></span></button>
     <button type="button" data-tab="att" aria-pressed="false">출석</button>
     <button type="button" data-tab="mem" aria-pressed="false">학생<span class="tbadge" id="tbMem" hidden></span></button>
+    <button type="button" data-tab="rec" aria-pressed="false">기록</button>
     <button type="button" data-tab="set" aria-pressed="false">설정</button>
   </nav>
   <h1>관리자 화면</h1>
@@ -225,6 +226,15 @@
     <span class="msg" id="cMsg"></span>
   </div>
 
+  <div class="bar" id="recBar" style="margin-top:12px">
+    <b style="flex:1">저장된 화면 기록</b>
+    <button id="recReload" class="ghost">새로고침</button>
+    <p class="msg" style="flex-basis:100%;margin:0">2초마다 남긴 화면은 이 기기에 보관됩니다. 학생이 종료하거나 이 화면을 닫아도 남아 있고, 직접 지울 때까지 보관됩니다.
+      <b>기록은 이 관리자 앱이 켜져 있고 화면이 켜져 있는 동안에만 남습니다.</b></p>
+    <div id="recList" style="flex-basis:100%"></div>
+    <span class="msg" id="recMsg"></span>
+  </div>
+
   <div class="bar" style="margin-top:12px">
     <b style="flex:1">하루 기록</b>
     <input type="date" id="hDay" aria-label="조회할 날짜">
@@ -238,14 +248,6 @@
     <b style="flex-basis:100%">앱 업데이트</b>
     <span class="sub" style="flex:1">새 기능이 안 보이면 눌러 최신 버전으로 다시 엽니다. 저장된 화면 기록은 지워지지 않습니다.</span>
     <button type="button" onclick="smUpdate(this)">앱 업데이트</button>
-  </div>
-  <div class="bar" id="recBar" style="margin-top:12px;display:none">
-    <b style="flex:1">저장된 화면 기록</b>
-    <button id="recReload" class="ghost">새로고침</button>
-    <p class="msg" style="flex-basis:100%;margin:0">2초마다 남긴 화면은 이 기기에 보관됩니다. 학생이 종료하거나 이 화면을 닫아도 남아 있고, 직접 지울 때까지 보관됩니다.
-      <b>기록은 이 관리자 앱이 켜져 있고 화면이 켜져 있는 동안에만 남습니다.</b></p>
-    <div id="recList" style="flex-basis:100%"></div>
-    <span class="msg" id="recMsg"></span>
   </div>
 
   <div id="statsHome" hidden>
@@ -321,19 +323,11 @@
     <p class="msg" id="uInfo" style="margin:0 0 12px"></p>
     <div class="utabs" role="tablist">
       <button type="button" data-u="rec" aria-pressed="true">통계·출석</button>
-      <button type="button" data-u="log" aria-pressed="false">기록</button>
       <button type="button" data-u="set" aria-pressed="false">공부 설정</button>
       <button type="button" data-u="acc" aria-pressed="false">계정</button>
     </div>
     <p class="msg" id="uMsg" style="margin:0 0 10px"></p>
 
-    <section class="upane" data-u="log" hidden>
-      <h3 class="sth">저장된 화면 기록 — 이 기기에 남은 2초 간격 화면</h3>
-      <p class="msg" id="uRecSum" style="margin:0 0 6px"></p>
-      <div id="uRec"></div>
-      <div id="uRecView"></div>
-      <div class="prow" id="uRecBtns" style="margin-top:10px"></div>
-    </section>
 
     <section class="upane" data-u="set" hidden>
       <div class="uform" id="uForm"></div>
@@ -738,21 +732,28 @@
 
   // --- 기록 탭: 저장된 화면 기록 목록 ---
   function mb(n) { return n >= 1e9 ? (n / 1e9).toFixed(1) + "GB" : Math.round(n / 1e6) + "MB"; }
-  function loadRecList() {
+  function loadRecList() { // 기록 탭: 이 기기에 저장된 화면 기록 (학생별 → 날짜별)
     var box = $("recList");
     idbSummary().then(function (sum) {
       box.textContent = "";
       var ids = Object.keys(sum).sort(function (a, b) { return sum[b].z - sum[a].z; });
-      $("recMsg").textContent = ids.length ? "" : "저장된 화면 기록이 없습니다.";
+      $("recMsg").textContent = ids.length ? "" : "이 기기에 저장된 화면 기록이 없습니다. 화면 기록은 관리자 앱을 켜 둔 그 기기에만 저장됩니다.";
       ids.forEach(function (uid) {
-        var o = sum[uid], d1 = new Date(o.a), d2 = new Date(o.z);
-        var day = function (d) { return (d.getMonth() + 1) + "/" + d.getDate() + " " + clock(d.getTime()).slice(0, 5); };
-        var row = document.createElement("div"); row.className = "mrow";
-        var txt = document.createElement("span");
-        txt.textContent = (names[uid] || o.name || "(알 수 없는 회원)") + " · " + o.n + "장 · " + day(d1) + " ~ " + day(d2);
-        var vb = document.createElement("button"); vb.type = "button"; vb.className = "ghost"; vb.textContent = "보기";
-        vb.addEventListener("click", function () { openStored(uid, names[uid] || o.name); });
-        row.append(txt, vb); box.append(row);
+        var m = memberOf(uid), who = (m ? (m.name || "") + " (" + window.smIdOf(m.email) + (m.role === "admin" ? ", 관리자" : "") + ")" : (sum[uid].name || "(알 수 없는 회원)"));
+        var h = document.createElement("h3"); h.className = "sth"; h.style.margin = "14px 0 4px";
+        h.textContent = who + " · 모두 " + sum[uid].n.toLocaleString() + "장"; box.append(h);
+        var list = document.createElement("div"); box.append(list);
+        idbDays(uid).then(function (days) {
+          Object.keys(days).sort().reverse().forEach(function (k) {
+            var o = days[k], dd = new Date(k + "T12:00:00");
+            var row = document.createElement("div"); row.className = "mrow";
+            var t = document.createElement("span");
+            t.textContent = (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ") · " + o.n.toLocaleString() + "장 · " + clock(o.a).slice(0, 5) + " ~ " + clock(o.z).slice(0, 5);
+            var b = document.createElement("button"); b.type = "button"; b.textContent = "보기";
+            b.addEventListener("click", function () { openStored(uid, m ? m.name : sum[uid].name, null, o.a); });
+            row.append(t, b); list.append(row);
+          });
+        });
       });
       try { navigator.storage.estimate().then(function (e) { if (ids.length && !recFull) $("recMsg").textContent = "이 기기에서 쓰는 공간 약 " + mb(e.usage) + (e.quota ? " / 쓸 수 있는 공간 약 " + mb(e.quota) : ""); }); } catch (e) {}
     }, function (e) { $("recMsg").textContent = "화면 기록 목록을 불러오지 못했습니다: " + e; });
@@ -761,7 +762,7 @@
   setTimeout(loadRecList, 500);
   $("pClose").addEventListener("click", function () {
     stopPlay(); cur = null; $("player").hidden = true;
-    if (stuId && !$("stu").hidden && !playerInline) loadStuLog(); // 학생 관리 창에서 열었으면 장수 다시 표시
+    if (!$("recBar").closest("[hidden]")) loadRecList(); // 기록 탭 목록 장수 갱신
   });
   setInterval(function () {
     if (!cur || (!playerInline && $("player").hidden) || !cur.frames.length) return;
@@ -906,11 +907,10 @@
       mon: [bar($("go")), $("summary"), $("grid"), $("empty")],
       att: [bar($("att"))],
       mem: [bar($("members"))],
-      // 기록 탭은 없앰 (화면 기록은 학생 관리 창 '기록' 탭에서 봄)
+      rec: [$("recBar"), bar($("hist"))],
       set: [bar($("rAway")), $("updBar")],
     };
     Object.keys(panes).forEach(function (k) { panes[k].forEach(function (el) { if (el) el.setAttribute("data-pane", k); }); });
-    var hb = bar($("hist")); if (hb) hb.style.display = "none";
     var subtitle = document.querySelector("main > .sub");
     function show(k) {
       Object.keys(panes).forEach(function (n) { panes[n].forEach(function (el) {
@@ -1292,7 +1292,7 @@
     document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.u === k)); });
     document.querySelectorAll("#stu .upane").forEach(function (el) { el.hidden = el.dataset.u !== k; });
     $("uMsg").textContent = "";
-    if (k === "log") loadStuLog(); else inlinePlayer(false);
+    inlinePlayer(false);
   }
   document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.addEventListener("click", function () { stuTab(b.dataset.u); }); });
   function openStu(id) {
