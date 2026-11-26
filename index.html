@@ -230,7 +230,7 @@ let state = "idle", lastTick = 0, lastFace = 0, closedSince = 0, lastOpen = 0;
 // 엄격 감지: 고개 숙임, 카메라 가림, 화면 멈춤(사진·정지 화면), 앱 나감
 let why = "", pitchBase = null, pitchSamples = [], headDownSince = 0;
 let darkSince = 0, lastBlink = 0, stillSince = 0, prevPix = null, nosePath = [];
-const HEAD_DOWN_DEG = 35, HEAD_DOWN_MIN_S = 20, DARK_S = 10, FROZEN_S = 60;
+const strict = { dark: 10, headDeg: 35, head: 20, frozen: 60 }; // 관리자가 정함
 const pixCanvas = document.createElement("canvas"); pixCanvas.width = 32; pixCanvas.height = 24;
 const pixCtx = pixCanvas.getContext("2d", { willReadFrequently: true });
 function resetStrict() {
@@ -279,6 +279,7 @@ function applyCfg(o) { // 관리자가 정한 감지 기준·휴식 시간 적�
     if (!Number.isFinite(v) || v <= 0) continue;
     BREAK_LIMIT_MIN[label] = v; $(el).textContent = v;
   }
+  for (const key of ["dark", "headDeg", "head", "frozen"]) { const v = Number(o[key]); if (Number.isFinite(v) && v > 0) strict[key] = v; }
   for (const [key, id] of [["away", "rAway"], ["drowsy", "rDrowsy"], ["thr", "rThr"]]) {
     const v = Number(o[key]);
     if (!Number.isFinite(v) || v <= 0) continue;
@@ -505,7 +506,8 @@ async function initAccount() {
   });
   setGoal(profile.goal_hours || settings.goal_hours || 4);
   applyCfg({ away: settings.away_sec, drowsy: settings.drowsy_sec, thr: settings.eye_thr,
-             toilet: settings.toilet_min, rest: settings.rest_min });
+             toilet: settings.toilet_min, rest: settings.rest_min,
+             dark: settings.dark_sec, headDeg: settings.head_deg, head: settings.head_sec, frozen: settings.frozen_sec });
   try { // 오늘 이미 쌓인 시간이 있으면 이어서 누적
     const { data } = await window.sb.from("study_days").select("study_ms,away_ms,drowsy_ms,break_ms")
       .eq("user_id", profile.id).eq("day", dayKey).maybeSingle();
@@ -567,11 +569,11 @@ function tick() {
     if (pitchBase === null) {
       pitchSamples.push(p);
       if (pitchSamples.length >= 100) { const s = pitchSamples.slice().sort((x, y) => x - y); pitchBase = s[50]; }
-    } else if (p - pitchBase > HEAD_DOWN_DEG) { if (!headDownSince) headDownSince = now; }
+    } else if (p - pitchBase > strict.headDeg) { if (!headDownSince) headDownSince = now; }
     else headDownSince = 0;
     const n = res.faceLandmarks[0][1];
     nosePath.push({ t: now, x: n.x, y: n.y });
-    while (nosePath.length && now - nosePath[0].t > FROZEN_S * 1000) nosePath.shift();
+    while (nosePath.length && now - nosePath[0].t > strict.frozen * 1000) nosePath.shift();
   } else headDownSince = 0;
 
   // 카메라 가림·화면 멈춤
@@ -579,12 +581,12 @@ function tick() {
   if (now - lastPix >= 1000) { lastPix = now; move = pixelCheck(now); 
     if (move < 1.2) { if (!stillSince) stillSince = now; } else stillSince = 0; }
   let frozen = false;
-  if (hasFace && stillSince && now - stillSince >= FROZEN_S * 1000 && now - lastBlink >= FROZEN_S * 1000 && nosePath.length > 10) {
+  if (hasFace && stillSince && now - stillSince >= strict.frozen * 1000 && now - lastBlink >= strict.frozen * 1000 && nosePath.length > 10) {
     let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
     nosePath.forEach((q) => { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); });
     frozen = x1 - x0 < 0.004 && y1 - y0 < 0.004; // 1분 동안 얼굴이 전혀 안 움직이고 한 번도 깜빡이지 않음
   }
-  const covered = darkSince && now - darkSince >= DARK_S * 1000;
+  const covered = darkSince && now - darkSince >= strict.dark * 1000;
 
   if (onBreak) { // 휴식 중에는 자리비움·졸음으로 세지 않음. 자리를 떴다가 돌아오면 자동으로 공부 재개
     if (!hasFace) { if (!goneSince) goneSince = now; if (now - goneSince > 5000) breakLeft = true; }
@@ -607,7 +609,7 @@ function tick() {
   else if (frozen) { next = "away"; w = "화면 멈춤·사진 의심"; }
   else if (now - lastFace >= cfg.away * 1000) next = "away";
   else if (closedSince && now - closedSince >= cfg.drowsy * 1000) { next = "drowsy"; w = "눈 감음"; }
-  else if (headDownSince && now - headDownSince >= Math.max(HEAD_DOWN_MIN_S, cfg.drowsy) * 1000) { next = "drowsy"; w = "고개 숙임"; }
+  else if (headDownSince && now - headDownSince >= strict.head * 1000) { next = "drowsy"; w = "고개 숙임"; }
   else if (!hasFace && state !== "study") next = state === "idle" ? "study" : state; // 얼굴이 잠깐 안 잡힐 때는 이전 상태 유지
   if (next !== state) why = w;
   setState(next);

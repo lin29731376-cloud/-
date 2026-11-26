@@ -202,6 +202,14 @@
       <input type="range" id="rToilet" min="1" max="60" step="1" value="10"></label>
     <label class="cfg">식사·휴식 제한 시간 <output id="oRest"></output>
       <input type="range" id="rRest" min="5" max="180" step="5" value="40"></label>
+    <label class="cfg">카메라 가림: 화면이 어두운 시간 <output id="oDark"></output>
+      <input type="range" id="rDark" min="3" max="120" step="1" value="10"></label>
+    <label class="cfg">고개 숙임: 평소 자세보다 더 숙인 각도 <output id="oHeadDeg"></output>
+      <input type="range" id="rHeadDeg" min="15" max="70" step="1" value="35"></label>
+    <label class="cfg">고개 숙임: 숙인 채 있는 시간 <output id="oHead"></output>
+      <input type="range" id="rHead" min="5" max="300" step="5" value="20"></label>
+    <label class="cfg">화면 멈춤·사진: 움직임과 눈 깜빡임이 없는 시간 <output id="oFrozen"></output>
+      <input type="range" id="rFrozen" min="20" max="600" step="10" value="60"></label>
     <label class="cfg">하루 목표 공부 시간 (기본값, 학생별로 따로 정할 수 있음) <output id="oGoal"></output>
       <input type="range" id="rGoal" min="0.5" max="16" step="0.5" value="4"></label>
     <button id="cSave">저장</button>
@@ -1326,8 +1334,12 @@
     $("oToilet").textContent = $("rToilet").value + "분";
     $("oRest").textContent = $("rRest").value + "분";
     $("oGoal").textContent = $("rGoal").value + "시간";
+    $("oDark").textContent = $("rDark").value + "초";
+    $("oHeadDeg").textContent = $("rHeadDeg").value + "도";
+    $("oHead").textContent = $("rHead").value + "초";
+    $("oFrozen").textContent = $("rFrozen").value + "초";
   }
-  ["rAway", "rDrowsy", "rThr", "rToilet", "rRest", "rGoal"].forEach(function (id) { $(id).addEventListener("input", showCfg); });
+  ["rAway", "rDrowsy", "rThr", "rToilet", "rRest", "rGoal", "rDark", "rHeadDeg", "rHead", "rFrozen"].forEach(function (id) { $(id).addEventListener("input", showCfg); });
   $("cSave").addEventListener("click", function () {
     var cfg = { away: Number($("rAway").value), drowsy: Number($("rDrowsy").value), thr: Number($("rThr").value) };
     var brk = { toilet: Number($("rToilet").value), rest: Number($("rRest").value) };
@@ -1339,11 +1351,15 @@
         $("cSave").disabled = false;
         if (r2.error) { fail("휴식 시간 — " + r2.error.message); return; }
         var goal = Number($("rGoal").value);
+        var sc = { dark: Number($("rDark").value), head_deg: Number($("rHeadDeg").value), head: Number($("rHead").value), frozen: Number($("rFrozen").value) };
         window.sb.rpc("set_goal", { target: null, hours: goal }).then(function (r3) {
+          if (r3.error) { fail("목표 시간 — " + r3.error.message + " (goal.sql)"); return; }
+          return window.sb.rpc("set_strict", sc).then(function (r4) {
           $("cSave").disabled = false;
-          if (r3.error) { fail("목표 시간 — " + r3.error.message); return; }
+          if (r4.error) { fail("엄격 감지 — " + r4.error.message + " (strict.sql)"); return; }
           window.smAuth.settings.goal_hours = goal;
-          var sent = 0, msg = { cmd: "cfg", away: cfg.away, drowsy: cfg.drowsy, thr: cfg.thr, toilet: brk.toilet, rest: brk.rest };
+          var sent = 0, msg = { cmd: "cfg", away: cfg.away, drowsy: cfg.drowsy, thr: cfg.thr, toilet: brk.toilet, rest: brk.rest,
+                                dark: sc.dark, headDeg: sc.head_deg, head: sc.head, frozen: sc.frozen };
           tiles.forEach(function (t, key) {
             try {
               if (t.send && t.send(msg)) sent++;
@@ -1352,6 +1368,7 @@
             } catch (e) {}
           });
           $("cMsg").textContent = "저장했습니다. 접속 중인 학생 " + sent + "명에게 바로 적용했고, 나머지는 다음 접속 때 적용됩니다.";
+          });
         }, function (e) { fail(String(e)); });
       }, function (e) { fail(String(e)); });
     }, function (e) { fail(String(e)); });
@@ -1365,6 +1382,10 @@
     if (Number(st.toilet_min) > 0) $("rToilet").value = st.toilet_min;
     if (Number(st.rest_min) > 0) $("rRest").value = st.rest_min;
     if (Number(st.goal_hours) > 0) $("rGoal").value = st.goal_hours;
+    if (Number(st.dark_sec) > 0) $("rDark").value = st.dark_sec;
+    if (Number(st.head_deg) > 0) $("rHeadDeg").value = st.head_deg;
+    if (Number(st.head_sec) > 0) $("rHead").value = st.head_sec;
+    if (Number(st.frozen_sec) > 0) $("rFrozen").value = st.frozen_sec;
     showCfg();
     loadSched();
     $("topic").value = window.smAuth.settings.room_code || "";
