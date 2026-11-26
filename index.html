@@ -268,12 +268,36 @@ function renderTotals() {
   $("tBreak").textContent = fmt(total.break);
   renderGoal();
 }
-function addLog(text) {
+// 오늘 기록은 이 기기에 저장해 두어, 앱을 나갔다 들어오거나 새로 열어도 그대로 보이게 함
+function logKey() {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  const uid = window.smAuth && window.smAuth.profile ? window.smAuth.profile.id : "me";
+  return "sm_log_" + uid + "_" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+}
+function drawLog(at, text) {
   const log = $("log");
   const empty = log.querySelector(".empty"); if (empty) empty.remove();
   const li = document.createElement("li"), t = document.createElement("time"), s = document.createElement("span");
-  t.textContent = clockNow();
-  s.textContent = text; li.append(t, s); log.prepend(li);
+  t.textContent = at; s.textContent = text; li.append(t, s); log.prepend(li);
+}
+function addLog(text) {
+  const at = clockNow();
+  drawLog(at, text);
+  try {
+    const k = logKey(), arr = JSON.parse(localStorage.getItem(k) || "[]");
+    arr.push([at, text]); if (arr.length > 500) arr.splice(0, arr.length - 500);
+    localStorage.setItem(k, JSON.stringify(arr));
+  } catch (e) { /* 저장 안 돼도 화면에는 보임 */ }
+}
+function restoreLog() { // 오늘 남긴 기록을 다시 그림 (지난 날짜 기록은 정리)
+  try {
+    const k = logKey();
+    Object.keys(localStorage).forEach((x) => { if (x.indexOf("sm_log_") === 0 && x.slice(-8) !== k.slice(-8)) localStorage.removeItem(x); });
+    const arr = JSON.parse(localStorage.getItem(k) || "[]");
+    if (!arr.length) return;
+    $("log").textContent = "";
+    arr.forEach(([at, text]) => drawLog(at, text));
+  } catch (e) {}
 }
 function beep() {
   if (!$("beep").checked || !audio) return;
@@ -457,6 +481,7 @@ function saveEvent(kind) { // 상태 변화 기록
 }
 async function initAccount() {
   const { profile, settings, logout } = window.smAuth;
+  restoreLog();
   $("who").value = profile.name || window.smIdOf(profile.email) || "이름 미입력";
   $("topic").value = settings.ntfy_topic || ""; $("room").value = settings.room_code || "";
   $("meName").textContent = $("who").value; $("meEmail").textContent = "아이디 " + window.smIdOf(profile.email);
