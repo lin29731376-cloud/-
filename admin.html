@@ -166,9 +166,9 @@
 
   <div class="bar">
     <input type="hidden" id="topic">
-    <button id="go">관리 시작</button>
+    <button id="go" hidden>관리 시작</button>
     <button id="logout" class="ghost">로그아웃</button>
-    <span class="msg" id="msg">「관리 시작」을 누르세요. 이 화면은 켜 둔 채로 두어야 합니다.</span>
+    <span class="msg" id="msg">관리를 준비하는 중…</span>
     <span class="msg" id="lkMsg"></span>
   </div>
 
@@ -1401,14 +1401,25 @@
   $("logout").addEventListener("click", function () { if (window.smAuth) window.smAuth.logout(); });
   if (window.smAuth) onReady(); else document.addEventListener("sm-ready", onReady, { once: true });
 
-  $("go").addEventListener("click", function () {
-    if (!window.LivekitClient || !window.sb) { say("영상 연결 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침하세요.", true); return; }
-    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; }
-    $("go").disabled = true; running = true;
-    say("관리 중 — 학생 접속을 기다립니다. 이 화면을 닫으면 관리가 중단됩니다.");
-    if ($("grid").hidden === false) $("summary").hidden = false; summarize(); keepAwake();
+  // 관리자 앱을 열면 자동으로 관리 시작 — 학생이 「공부 시작」을 누르면 바로 화면에 뜸
+  var monTries = 0;
+  function startMon() {
+    if (running) return;
+    if (!window.LivekitClient || !window.sb || !window.smAuth) {
+      if (++monTries > 20) { say("영상 연결 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하고 「관리 시작」을 누르세요.", true); $("go").hidden = false; return; }
+      setTimeout(startMon, 500); return;
+    }
+    $("go").disabled = true; $("go").hidden = true; running = true;
+    say("관리 중 — 학생이 「공부 시작」을 누르면 자동으로 화면에 나타납니다. 이 앱을 켜 둔 채로 두세요.");
+    if (!$("grid").classList.contains("offscreen")) $("summary").hidden = false; summarize(); keepAwake();
     startLkAdmin();
-  });
+  }
+  function unlockSound() { // 알림음은 화면을 한 번 눌러야 켜지는 브라우저 규칙이 있음
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch (e) { audio = null; }
+  }
+  document.addEventListener("pointerdown", unlockSound, { once: true });
+  $("go").addEventListener("click", function () { monTries = 0; unlockSound(); startMon(); });
+  if (window.smAuth) startMon(); else document.addEventListener("sm-ready", startMon, { once: true });
 })();
 </script>
 <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});</script>
