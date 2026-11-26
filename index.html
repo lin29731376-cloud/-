@@ -101,10 +101,6 @@
   .stat.a b { color: var(--away-ink); } .stat.d b { color: var(--drowsy); } .stat.k b { color: var(--break); }
 
   label { display: block; font-size: 14px; margin-top: 12px; }
-  .rules { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0 0; font-size: 14px; }
-  .rules dt { color: var(--muted); }
-  .rules dd { margin: 0; }
-  .rules output { font-weight: 700; font-variant-numeric: tabular-nums; }
   label output { float: right; font-variant-numeric: tabular-nums; color: var(--muted); }
   input[type=range] { width: 100%; margin-top: 4px; accent-color: var(--study); }
   input[type=text], input[type=password] { width: 100%; margin-top: 4px; padding: 10px 12px; border: 1.5px solid var(--line);
@@ -187,21 +183,15 @@
           <input type="range" id="rGoal" min="1" max="14" step="0.5" value="4"></label>
       </details>
 
-      <details class="sheet">
-        <summary>감지 기준</summary>
-        <p class="msg" style="margin:0">선생님이 정한 기준입니다. 바꾸려면 선생님께 말씀하세요.</p>
-        <dl class="rules">
-          <dt>자리비움</dt><dd>얼굴이 <output id="oAway"></output> 동안 안 보이면</dd>
-          <dt>졸음 의심</dt><dd>눈을 <output id="oDrowsy"></output> 동안 감고 있으면</dd>
-          <dt>눈 감김 판정</dt><dd>기준값 <output id="oThr"></output></dd>
-        </dl>
-        <input type="range" id="rAway" min="3" max="300" step="1" value="30" hidden>
-        <input type="range" id="rDrowsy" min="2" max="60" step="1" value="8" hidden>
-        <input type="range" id="rThr" min="0.3" max="0.9" step="0.05" value="0.6" hidden>
-        <label>지금 눈 감김 정도 (빨간 선을 넘으면 감은 것으로 판정)
-          <div class="meter"><i id="eyeBar"></i><em id="eyeMark"></em></div></label>
-        <label class="check"><input type="checkbox" id="beep" checked> 졸음·자리비움 때 알림음</label>
-      </details>
+      <!-- 감지 기준은 관리자가 정하므로 화면에 보이지 않음 (계산에 필요한 값만 숨겨 둠) -->
+      <div hidden>
+        <output id="oAway"></output><output id="oDrowsy"></output><output id="oThr"></output>
+        <input type="range" id="rAway" min="3" max="300" step="1" value="30">
+        <input type="range" id="rDrowsy" min="2" max="60" step="1" value="8">
+        <input type="range" id="rThr" min="0.3" max="0.9" step="0.05" value="0.6">
+        <div class="meter"><i id="eyeBar"></i><em id="eyeMark"></em></div>
+        <input type="checkbox" id="beep" checked>
+      </div>
 
       <details class="sheet">
         <summary>내 계정</summary>
