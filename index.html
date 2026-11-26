@@ -437,7 +437,12 @@ async function recShot() {
   if (st !== "study" && st !== "idle") stampFrame(st, badge.textContent, now, false);
   saveShot(now, st, false).catch(() => {});
 }
+let filling = false;
 async function fillLeftApp(from, to) { // 앱을 나가 있던 동안은 카메라가 꺼지므로 '폰 사용 의심' 화면으로 채움
+  filling = true;
+  try { await fillLeftAppInner(from, to); } finally { filling = false; }
+}
+async function fillLeftAppInner(from, to) {
   const step = to - from > 3600000 ? 10000 : 2000;
   recCv.width = REC_W; recCv.height = Math.round(REC_W * 3 / 4);
   for (let t = from + step; t < to; t += step) {
@@ -470,6 +475,36 @@ async function syncTo(adminId, since) { // 관리자가 아직 못 받은 장면
   }
   recSubs.add(adminId);
 }
+// --- 서버로 올리기: 30초마다 쌓인 장면을 묶어서 올림 (관리자는 언제든 서버에서 봄) ---
+let upBusy = false, upPauseUntil = 0;
+const upKey = () => "sm_rec_up_" + myUid();
+const upLast = () => { try { return Number(localStorage.getItem(upKey())) || 0; } catch (e) { return 0; } };
+const dayOf = (t) => { const d = new Date(t), z = (x) => String(x).padStart(2, "0"); return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()); };
+async function uploadRec(force) {
+  if (upBusy || filling || !window.sb || !myUid() || Date.now() < upPauseUntil) return;
+  upBusy = true;
+  try {
+    for (let round = 0; round < 40; round++) {
+      let rows = await rafter(upLast(), 60);
+      if (!rows.length) break;
+      const day = dayOf(rows[0].t); rows = rows.filter((r) => dayOf(r.t) === day); // 하루 단위로 나눔
+      if (!force && rows.length < 30 && Date.now() - rows[0].t < 60000) break; // 조금 더 모았다가 올림
+      const parts = [];
+      for (const r of rows) {
+        const p = await packShot(r), len = new Uint8Array(4);
+        new DataView(len.buffer).setUint32(0, p.length); parts.push(len, p);
+      }
+      const path = myUid() + "/" + day + "/" + rows[0].t + ".bin";
+      const { error } = await window.sb.storage.from("rec").upload(path, new Blob(parts, { type: "application/octet-stream" }), { upsert: false });
+      const dup = error && /exist|duplicate|409/i.test(String(error.message || error.statusCode || error)); // 이미 올라간 묶음
+      if (error && !dup) { upPauseUntil = Date.now() + 5 * 60000; console.warn("화면 기록 올리기 실패", error); break; } // 서버 준비 전이면 5분 뒤 다시
+      try { localStorage.setItem(upKey(), String(rows[rows.length - 1].t)); } catch (e) {}
+    }
+  } catch (e) { console.warn(e); }
+  upBusy = false;
+}
+setInterval(() => uploadRec(false), 30000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") uploadRec(true); });
 function sendStatus() {
   sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : (state === "away" || state === "drowsy") ? why : "" });
 }
@@ -799,7 +834,7 @@ $("start").addEventListener("click", async () => {
 });
 
 function stopAll() {
-  clearInterval(recTimer); recTimer = null; recSubs.clear();
+  clearInterval(recTimer); recTimer = null; recSubs.clear(); setTimeout(() => uploadRec(true), 500); // 끝내면 남은 장면 바로 올림
   clearInterval(timer); timer = null; stopLink(); saveTotals();
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
