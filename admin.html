@@ -323,11 +323,17 @@
     <p class="msg" id="uInfo" style="margin:0 0 12px"></p>
     <div class="utabs" role="tablist">
       <button type="button" data-u="rec" aria-pressed="true">통계·출석</button>
+      <button type="button" data-u="day" aria-pressed="false">하루 기록</button>
       <button type="button" data-u="set" aria-pressed="false">공부 설정</button>
       <button type="button" data-u="acc" aria-pressed="false">계정</button>
     </div>
     <p class="msg" id="uMsg" style="margin:0 0 10px"></p>
 
+
+    <section class="upane" data-u="day" hidden>
+      <p class="msg" style="margin:0 0 6px">최근 30일 동안 공부한 날입니다. 「리포트」를 누르면 그날의 시간대별 기록이 나오고, 복사해서 학부모에게 보낼 수 있습니다.</p>
+      <div id="uDays"></div>
+    </section>
 
     <section class="upane" data-u="set" hidden>
       <div class="uform" id="uForm"></div>
@@ -907,10 +913,11 @@
       mon: [bar($("go")), $("summary"), $("grid"), $("empty")],
       att: [bar($("att"))],
       mem: [bar($("members"))],
-      rec: [$("recBar"), bar($("hist"))],
+      rec: [$("recBar")],
       set: [bar($("rAway")), $("updBar")],
     };
     Object.keys(panes).forEach(function (k) { panes[k].forEach(function (el) { if (el) el.setAttribute("data-pane", k); }); });
+    var hb = bar($("hist")); if (hb) hb.style.display = "none"; // 하루 기록은 학생 관리 창으로 옮김
     var subtitle = document.querySelector("main > .sub");
     function show(k) {
       Object.keys(panes).forEach(function (n) { panes[n].forEach(function (el) {
@@ -1288,11 +1295,34 @@
       if (!cur || cur.uid !== uid) openStored(uid, name, null, days[keys[0]].a);
     }, function (e) { box.textContent = "화면 기록을 읽지 못했습니다: " + e; });
   }
+  function loadStuDays() { // 학생 관리 창 '하루 기록' 탭: 최근 30일 날짜별 기록 + 리포트
+    var uid = stuId; if (!uid) return;
+    var name = names[uid] || "학생", db = $("uDays"); db.textContent = "불러오는 중…";
+    var from = new Date(); from.setDate(from.getDate() - 29);
+    window.sb.from("study_days").select("user_id,day,study_ms,away_ms,drowsy_ms,break_ms").eq("user_id", uid)
+      .gte("day", keyOf(from)).order("day", { ascending: false }).limit(31).then(function (r) {
+        if (stuId !== uid) return;
+        db.textContent = "";
+        if (r.error) { db.textContent = "기록을 불러오지 못했습니다: " + r.error.message; return; }
+        var rows = (r.data || []).slice().sort(function (a, b) { return a.day < b.day ? 1 : -1; });
+        if (!rows.length) { db.textContent = "최근 30일 동안 공부 기록이 없습니다."; return; }
+        rows.forEach(function (x) {
+          var row = document.createElement("div"); row.className = "mrow";
+          var t = document.createElement("span"), dd = new Date(x.day + "T12:00:00");
+          t.textContent = (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ") · 공부 " + fmt(x.study_ms) + " · 자리비움 " + fmt(x.away_ms)
+            + " · 졸음 " + fmt(x.drowsy_ms) + " · 휴식 " + fmt(x.break_ms);
+          var b = document.createElement("button"); b.type = "button"; b.className = "ghost"; b.textContent = "리포트";
+          b.addEventListener("click", function () { loadEvents(x, x.day, name); });
+          row.append(t, b); db.append(row);
+        });
+      }, function (e) { db.textContent = "기록을 불러오지 못했습니다: " + e; });
+  }
   function stuTab(k) {
     document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.u === k)); });
     document.querySelectorAll("#stu .upane").forEach(function (el) { el.hidden = el.dataset.u !== k; });
     $("uMsg").textContent = "";
     inlinePlayer(false);
+    if (k === "day") loadStuDays();
   }
   document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.addEventListener("click", function () { stuTab(b.dataset.u); }); });
   function openStu(id) {
@@ -1343,7 +1373,7 @@
     $("hMsg").textContent = "불러오는 중…";
     window.sb.from("study_events").select("kind,at").eq("user_id", d.user_id)
       .gte("at", from.toISOString()).lt("at", to.toISOString()).order("at").limit(500).then(function (r) {
-        if (r.error) { $("hMsg").textContent = "상세 기록을 불러오지 못했습니다: " + r.error.message; return; }
+        if (r.error) { $("hMsg").textContent = $("uMsg").textContent = "상세 기록을 불러오지 못했습니다: " + r.error.message; return; }
         $("hMsg").textContent = "";
         var n = { away: 0, drowsy: 0, break: 0 };
         r.data.forEach(function (e) { if (n[e.kind] !== undefined) n[e.kind]++; });
