@@ -229,8 +229,8 @@
   <div class="bar" id="recBar" style="margin-top:12px">
     <b style="flex:1">저장된 화면 기록</b>
     <button id="recReload" class="ghost">새로고침</button>
-    <p class="msg" style="flex-basis:100%;margin:0">2초마다 남긴 화면은 이 기기에 보관됩니다. 학생이 종료하거나 이 화면을 닫아도 남아 있고, 직접 지울 때까지 보관됩니다.
-      <b>기록은 이 관리자 앱이 켜져 있고 화면이 켜져 있는 동안에만 남습니다.</b></p>
+    <p class="msg" style="flex-basis:100%;margin:0">학생 폰이 공부하는 동안 2초마다 화면을 찍어 두고, 이 관리자 앱과 연결되면 자동으로 보내 줍니다. 관리자가 보고 있지 않아도 빠지지 않습니다.
+      받은 화면은 이 기기에 보관되며 직접 지울 때까지 남습니다. <b>학생이 공부를 끝낸 뒤 이 앱을 열었다면, 그 학생이 다음에 공부를 시작할 때 밀린 화면을 받아옵니다.</b> (학생 폰에는 최대 이틀치 보관)</p>
     <div id="recList" style="flex-basis:100%"></div>
     <span class="msg" id="recMsg"></span>
   </div>
@@ -526,65 +526,38 @@
     } catch (e) {}
   }
   checkSpace(); setInterval(checkSpace, 60000);
-  var canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
-  var rec = { n: 0, last: 0, err: "", who: 0 };
+  // 화면 기록은 학생 폰이 2초마다 찍어 두었다가, 이 관리자 앱이 연결되면 보내 줌 (관리자가 안 보고 있어도 빠지지 않음)
+  var rec = { n: 0, last: 0, err: "", who: {} };
   function recStatus() {
     var el = $("recLive"); if (!el) return;
-    if (recFull) { el.textContent = "기록 멈춤: 기기 저장 공간이 거의 찼습니다."; return; }
-    if (rec.err) { el.textContent = "기록 실패: " + rec.err; return; }
-    if (!rec.who) { el.textContent = "지금 기록 중인 학생 없음 (학생이 「공부 시작」을 눌러 영상이 연결되면 자동으로 기록됩니다)"; return; }
-    el.textContent = "지금 기록 중: 학생 " + rec.who + "명 · 이번에 저장한 화면 " + rec.n + "장" + (rec.last ? " · 마지막 " + clock(rec.last) : "");
+    if (recFull) { el.textContent = "기록 받기 멈춤: 이 기기 저장 공간이 거의 찼습니다."; return; }
+    if (rec.err) { el.textContent = "기록 저장 실패: " + rec.err; return; }
+    var who = Object.keys(rec.who).length;
+    el.textContent = rec.n ? "화면 기록 받는 중: 학생 " + who + "명 · 이번에 받은 화면 " + rec.n.toLocaleString() + "장" + (rec.last ? " · 마지막 " + clock(rec.last) : "")
+      : "학생이 공부하는 동안 학생 폰에 화면이 저장되고, 이 앱이 연결되면 자동으로 받아옵니다.";
   }
-  setInterval(function () {
-    rec.who = 0;
-    if (recFull) { recStatus(); return; }
-    tiles.forEach(function (t, key) {
-      var v = t.video, uid = String(key).replace(/^lk:stu-/, "");
-      // 앱을 나간 동안에는 학생 영상이 멈추지만, 돌아올 때까지 '폰 사용 의심' 화면으로 계속 기록 (최대 6시간)
-      var phone = t.leftApp && t.leftAt && Date.now() - t.leftAt < 6 * 3600000;
-      if (!phone && (!v.videoWidth || t.state === "off" || t.state === "lost")) return;
-      rec.who++;
-      if (v.paused) { try { v.play().catch(function () {}); } catch (e) {} }
-      canvas.width = 320; canvas.height = v.videoWidth ? Math.round(320 * v.videoHeight / v.videoWidth) : 240;
-      var at = Date.now(), st = t.state;
-      if (phone) {
-        ctx.fillStyle = "#1e2a44"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        try { if (v.videoWidth) { ctx.globalAlpha = 0.35; ctx.drawImage(v, 0, 0, canvas.width, canvas.height); ctx.globalAlpha = 1; } } catch (e) { ctx.globalAlpha = 1; }
-        var col2 = ST_COLOR.away, mins = Math.floor((at - t.leftAt) / 60000), secs = Math.floor((at - t.leftAt) / 1000) % 60;
-        ctx.lineWidth = 8; ctx.strokeStyle = col2; ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-        ctx.fillStyle = col2; ctx.fillRect(0, 0, canvas.width, 30);
-        ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-        ctx.font = "bold 17px sans-serif"; ctx.fillText("자리비움  " + clock(at), 10, 16);
-        ctx.textAlign = "center"; ctx.font = "bold 22px sans-serif";
-        ctx.fillText("📱 앱 나감 · 폰 사용 의심", canvas.width / 2, canvas.height / 2);
-        ctx.font = "16px sans-serif";
-        ctx.fillText("나간 지 " + mins + "분 " + secs + "초 (카메라 꺼짐)", canvas.width / 2, canvas.height / 2 + 30);
-        ctx.textAlign = "left"; st = "away";
-      } else {
-        try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
-      }
-      if (st !== "study" && !phone) { // 공부 중이 아니면 화면에 상태를 찍어 둠 (테두리 + 상단 띠)
-        var col = ST_COLOR[st] || "#6b7280", label = (t.badge && t.badge.textContent) || LABEL[st] || st;
-        ctx.lineWidth = 8; ctx.strokeStyle = col; ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-        ctx.fillStyle = col; ctx.fillRect(0, 0, canvas.width, 30);
-        ctx.fillStyle = "#fff"; ctx.font = "bold 17px sans-serif"; ctx.textBaseline = "middle";
-        ctx.fillText(label + "  " + clock(at), 10, 16);
-      }
-      canvas.toBlob(function (b) {
-        if (!b) return;
-        var row = { uid: uid, name: t.who || names[uid] || "", t: at, b: b, s: st };
-        idb().then(function (db) {
-          var rq = db.transaction("frames", "readwrite").objectStore("frames").add(row);
-          rq.onerror = function () { rec.err = String(rq.error && (rq.error.name + ": " + rq.error.message) || "저장 오류"); recStatus(); };
-          rq.onsuccess = function () {
-            row.id = rq.result; rec.n++; rec.last = at; rec.err = "";
-            if (cur && cur.uid === uid && (!cur.day || cur.day === new Date(at).toDateString())) { cur.frames.push(row); syncSeek(); } // 보고 있는 중이면 바로 이어 붙임
-          };
-        }).catch(function (e) { rec.err = "저장소를 열지 못했습니다 (" + (e && (e.name || e.message) || e) + ")"; recStatus(); });
-      }, "image/jpeg", 0.5);
-    });
-    recStatus();
-  }, 2000);
+  setInterval(recStatus, 2000);
+  function lastT(uid) { try { return Number(localStorage.getItem("sm_rec_last_" + uid)) || 0; } catch (e) { return 0; } }
+  function setLastT(uid, t) { try { if (t > lastT(uid)) localStorage.setItem("sm_rec_last_" + uid, String(t)); } catch (e) {} }
+  var recSeen = {};
+  function recvFrame(uid, name, payload) { // [헤더 길이 2바이트][헤더 JSON][JPEG]
+    if (recFull) return;
+    try {
+      var n = (payload[0] << 8) | payload[1], head = JSON.parse(new TextDecoder().decode(payload.subarray(2, 2 + n)));
+      var b = new Blob([payload.subarray(2 + n)], { type: "image/jpeg" });
+      var row = { uid: uid, name: name || names[uid] || "", t: Number(head.t), b: b, s: head.s || "" };
+      if (!row.t) return;
+      var seen = recSeen[uid] = recSeen[uid] || {}; if (seen[row.t]) return; seen[row.t] = 1; // 같은 장면을 두 번 받으면 무시
+      idb().then(function (db) {
+        var rq = db.transaction("frames", "readwrite").objectStore("frames").add(row);
+        rq.onerror = function () { rec.err = String(rq.error && (rq.error.name + ": " + rq.error.message) || "저장 오류"); };
+        rq.onsuccess = function () {
+          row.id = rq.result; rec.n++; rec.last = row.t; rec.err = ""; rec.who[uid] = 1; setLastT(uid, row.t);
+          if (cur && cur.uid === uid && (!cur.day || cur.day === new Date(row.t).toDateString())) { cur.frames.push(row); cur.frames.sort(function (x, y) { return x.t - y.t; }); syncSeek(); }
+        };
+      }).catch(function (e) { rec.err = "저장소를 열지 못했습니다 (" + (e && (e.name || e.message) || e) + ")"; });
+    } catch (e) {}
+  }
   // 관리자 화면이 자동으로 꺼지면 기록이 멈추므로, 켜져 있는 동안 화면 꺼짐을 막음
   var adminLock = null;
   function adminAwake() {
@@ -875,14 +848,20 @@
           room.localParticipant.publishData(enc.encode(JSON.stringify(o)), { reliable: true, destinationIdentities: [p.identity] });
           return true;
         };
+        if (t.pulledFrom !== p.sid) { // 처음 만났으면 학생 폰에 쌓인 화면 기록을 받아옴
+          t.pulledFrom = p.sid;
+          var uid = p.identity.replace(/^stu-/, "");
+          setTimeout(function () { try { t.send({ cmd: "pull", since: lastT(uid) }); } catch (e) {} }, 1500);
+        }
         return t;
       }
       room.on(LK.RoomEvent.ParticipantConnected, bind);
       room.on(LK.RoomEvent.TrackSubscribed, function (track, pub, p) {
         var t = bind(p); if (t && track.kind === "video") track.attach(t.video);
       });
-      room.on(LK.RoomEvent.DataReceived, function (payload, p) {
-        if (!bind(p)) return;
+      room.on(LK.RoomEvent.DataReceived, function (payload, p, kind, topic) {
+        var t = bind(p); if (!t) return;
+        if (topic === "rec") { recvFrame(p.identity.replace(/^stu-/, ""), t.who, payload); return; }
         try { onData("lk:" + p.identity, JSON.parse(dec.decode(payload))); } catch (e) {}
       });
       room.on(LK.RoomEvent.ParticipantDisconnected, function (p) {

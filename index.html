@@ -379,6 +379,97 @@ function sendMsg(obj) { // 관리자에게만 전달
   lk.room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(obj)),
     { reliable: true, destinationIdentities: to }).catch(() => {});
 }
+// --- 화면 기록: 공부하는 동안 2초마다 이 폰에 저장 → 관리자 앱이 연결되면 보내 줌 (관리자가 안 보고 있어도 남음) ---
+const REC_W = 256, REC_KEEP_MS = 2 * 86400000;
+const REC_COLOR = { away: "#e9a514", drowsy: "#d64541", break: "#4f8a74" };
+let recDbP = null, recTimer = null, lastShot = 0;
+const recSubs = new Set(); // 지금 실시간으로 받는 관리자
+function rdb() {
+  return recDbP || (recDbP = new Promise((res, rej) => {
+    const rq = indexedDB.open("sm_rec_out", 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore("frames", { keyPath: ["u", "t"] });
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => { recDbP = null; rej(rq.error); };
+  }));
+}
+const myUid = () => (window.smAuth && window.smAuth.profile ? window.smAuth.profile.id : "");
+function rput(row) {
+  return rdb().then((db) => new Promise((res) => { const tx = db.transaction("frames", "readwrite"); tx.objectStore("frames").put(row); tx.oncomplete = res; tx.onerror = res; }));
+}
+function rafter(since, max) { // since 이후 장면 (시간순, 최대 max장)
+  const u = myUid();
+  return rdb().then((db) => new Promise((res) => {
+    const out = [], rq = db.transaction("frames").objectStore("frames").openCursor(IDBKeyRange.bound([u, since], [u, Infinity], true, false));
+    rq.onsuccess = () => { const c = rq.result; if (!c || out.length >= max) { res(out); return; } out.push(c.value); c.continue(); };
+    rq.onerror = () => res(out);
+  }));
+}
+function rprune() { // 이틀 지난 장면은 지움
+  rdb().then((db) => { db.transaction("frames", "readwrite").objectStore("frames").delete(IDBKeyRange.bound([myUid(), 0], [myUid(), Date.now() - REC_KEEP_MS])); }).catch(() => {});
+}
+const recCv = document.createElement("canvas"), recCtx = recCv.getContext("2d");
+function toJpeg(q) { return new Promise((res) => recCv.toBlob(res, "image/jpeg", q)); }
+function stampFrame(st, label, t, phone, mins) {
+  const W = recCv.width, H = recCv.height, col = REC_COLOR[st] || "#e9a514", z = (x) => String(x).padStart(2, "0");
+  const d = new Date(t), hh = z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
+  recCtx.lineWidth = 7; recCtx.strokeStyle = col; recCtx.strokeRect(3, 3, W - 6, H - 6);
+  recCtx.fillStyle = col; recCtx.fillRect(0, 0, W, 26);
+  recCtx.fillStyle = "#fff"; recCtx.textBaseline = "middle"; recCtx.textAlign = "left"; recCtx.font = "bold 14px sans-serif";
+  recCtx.fillText(label + "  " + hh, 8, 14);
+  if (phone) {
+    recCtx.textAlign = "center"; recCtx.font = "bold 18px sans-serif"; recCtx.fillText("📱 앱 나감 · 폰 사용 의심", W / 2, H / 2);
+    recCtx.font = "13px sans-serif"; recCtx.fillText("나간 지 " + mins + " (카메라 꺼짐)", W / 2, H / 2 + 24); recCtx.textAlign = "left";
+  }
+}
+async function saveShot(t, st, phone, mins) {
+  let b = await toJpeg(0.5);
+  if (b && b.size > 14000) b = await toJpeg(0.3); // 한 번에 보낼 수 있는 크기로
+  if (!b) return;
+  const row = { u: myUid(), t, s: st, b };
+  await rput(row);
+  recSubs.forEach((id) => sendShot(id, row)); // 실시간으로 받는 관리자에게 바로 보냄
+}
+async function recShot() {
+  if (!timer || !window.smAuth || document.visibilityState !== "visible" || !video.videoWidth) return;
+  const now = Date.now(); if (now - lastShot < 1800) return; lastShot = now;
+  recCv.width = REC_W; recCv.height = Math.round(REC_W * video.videoHeight / video.videoWidth);
+  try { recCtx.drawImage(video, 0, 0, recCv.width, recCv.height); } catch (e) { return; }
+  const st = onBreak ? "break" : state;
+  if (st !== "study" && st !== "idle") stampFrame(st, badge.textContent, now, false);
+  saveShot(now, st, false).catch(() => {});
+}
+async function fillLeftApp(from, to) { // 앱을 나가 있던 동안은 카메라가 꺼지므로 '폰 사용 의심' 화면으로 채움
+  const step = to - from > 3600000 ? 10000 : 2000;
+  recCv.width = REC_W; recCv.height = Math.round(REC_W * 3 / 4);
+  for (let t = from + step; t < to; t += step) {
+    recCtx.fillStyle = "#1e2a44"; recCtx.fillRect(0, 0, recCv.width, recCv.height);
+    const sec = Math.floor((t - from) / 1000);
+    stampFrame("away", "자리비움", t, true, Math.floor(sec / 60) + "분 " + (sec % 60) + "초");
+    try { await saveShot(t, "away", true); } catch (e) { break; }
+  }
+}
+function packShot(row) {
+  const head = new TextEncoder().encode(JSON.stringify({ t: row.t, s: row.s }));
+  return row.b.arrayBuffer().then((buf) => {
+    const out = new Uint8Array(2 + head.length + buf.byteLength);
+    out[0] = head.length >> 8; out[1] = head.length & 255; out.set(head, 2); out.set(new Uint8Array(buf), 2 + head.length);
+    return out;
+  });
+}
+function sendShot(adminId, row) {
+  if (!lk || lk.room.state !== "connected") return Promise.resolve();
+  return packShot(row).then((data) => lk.room.localParticipant.publishData(data, { reliable: true, destinationIdentities: [adminId], topic: "rec" })).catch(() => {});
+}
+async function syncTo(adminId, since) { // 관리자가 아직 못 받은 장면을 차례로 보냄, 다 보내면 실시간으로 전환
+  recSubs.delete(adminId);
+  let from = Number(since) || 0;
+  for (;;) {
+    if (!lk || lk.room.state !== "connected") return;
+    const rows = await rafter(from, 200);
+    if (!rows.length) break;
+    for (const r of rows) { await sendShot(adminId, r); from = r.t; }
+  }
+  recSubs.add(adminId);
+}
 function sendStatus() {
   sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : (state === "away" || state === "drowsy") ? why : "" });
 }
@@ -410,9 +501,10 @@ async function connectLink(gen) {
   const me = { room, pub: null };
   room.on(RoomEvent.DataReceived, (payload, from) => { // 관리자가 보낸 명령만 받음
     if (!from || !from.identity.startsWith("admin-")) return;
-    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); else if (d && d.cmd === "cfg") applyCfg(d); else if (d && d.cmd === "goal") setGoal(d.hours); } catch (e) {}
+    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); else if (d && d.cmd === "cfg") applyCfg(d); else if (d && d.cmd === "goal") setGoal(d.hours); else if (d && d.cmd === "pull") syncTo(from.identity, d.since); } catch (e) {}
   });
   room.on(RoomEvent.ParticipantConnected, () => sendStatus());
+  room.on(RoomEvent.ParticipantDisconnected, (p) => { if (p) recSubs.delete(p.identity); });
   room.on(RoomEvent.Disconnected, (reason) => {
     if (lk !== me) return;
     lk = null;
@@ -643,7 +735,10 @@ document.addEventListener("visibilitychange", () => {
     leftAt = Date.now(); why = "앱 나감·폰 사용 의심";
     setState("away"); sendStatus();
   } else {
-    if (leftAt) { addLog(`앱으로 돌아옴 (${Math.round((Date.now() - leftAt) / 1000)}초 나가 있었음)`); leftAt = 0; }
+    if (leftAt) {
+      addLog(`앱으로 돌아옴 (${Math.round((Date.now() - leftAt) / 1000)}초 나가 있었음)`);
+      fillLeftApp(leftAt, Date.now()).catch(() => {}); leftAt = 0;
+    }
     keepAwake(); recover();
   }
 });
@@ -690,6 +785,7 @@ $("start").addEventListener("click", async () => {
     lastTick = now; lastFace = now; closedSince = 0; why = ""; splitSince = 0;
     badge.hidden = false; faceTag.hidden = false; faceTag.textContent = "확인 중…"; setState("study");
     timer = setInterval(tick, 200); // 초당 5회면 충분
+    clearInterval(recTimer); recTimer = setInterval(recShot, 2000); rprune();
     keepAwake(); startLink(); breakButtons();
     $("stop").disabled = false; say("감지 중");
   } catch (e) {
@@ -703,6 +799,7 @@ $("start").addEventListener("click", async () => {
 });
 
 function stopAll() {
+  clearInterval(recTimer); recTimer = null; recSubs.clear();
   clearInterval(timer); timer = null; stopLink(); saveTotals();
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
