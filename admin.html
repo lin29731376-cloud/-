@@ -425,12 +425,12 @@
     var t = tiles.get(id); if (t) return t;
     var el = document.createElement("article"); el.className = "tile";
     el.innerHTML = '<div class="stage"><video autoplay playsinline muted></video><span class="badge"></span></div>' +
-                   '<div class="meta"><b></b><span></span><br><button type="button">기록 보기</button><button type="button" class="wakeBtn">깨우기</button><button type="button" class="repBtn">리포트</button></div>';
+                   '<div class="meta"><b></b><span></span><br><button type="button">기록 보기</button><button type="button" class="wakeBtn">깨우기</button></div>';
     $("grid").append(el);
     t = { el: el, video: el.querySelector("video"), badge: el.querySelector(".badge"),
           name: el.querySelector("b"), times: el.querySelector(".meta span"), last: Date.now(), state: "", who: "",
           frames: [], events: [], since: Date.now(), wakes: 0, tot: {} };
-    el.querySelector(".repBtn").addEventListener("click", function () { openReport(t); }); // frames: 2초마다 한 장, events: 상태 변화 시각
+    // 리포트는 학생 관리 창 '하루 기록' 탭에서 만듦
     el.querySelector(".meta button").addEventListener("click", function () { openPlayer(t); });
     t.wakeBtn = el.querySelector(".wakeBtn");
     t.wakeBtn.addEventListener("click", function () {
