@@ -326,11 +326,10 @@
     <p class="msg" id="uMsg" style="margin:0 0 10px"></p>
 
     <section class="upane" data-u="log" hidden>
-      <h3 class="sth">화면 기록 — 이 기기에 저장된 2초 간격 화면</h3>
-      <div class="prow" id="uRec" style="align-items:center"></div>
-      <h3 class="sth">날짜별 공부 기록 — 최근 14일</h3>
-      <p class="msg" style="margin:0 0 6px">「리포트」를 누르면 그날의 시간대별 기록이 나오고, 복사해서 학부모에게 보낼 수 있습니다.</p>
-      <div id="uDays"></div>
+      <h3 class="sth">저장된 화면 기록 — 이 기기에 남은 2초 간격 화면</h3>
+      <p class="msg" id="uRecSum" style="margin:0 0 6px"></p>
+      <div id="uRec"></div>
+      <div class="prow" id="uRecBtns" style="margin-top:10px"></div>
     </section>
 
     <section class="upane" data-u="set" hidden>
@@ -690,7 +689,7 @@
     var key = null; tiles.forEach(function (o, k) { if (o === t) key = k; });
     openStored(String(key || "").replace(/^lk:stu-/, ""), t.who, t.events);
   }
-  function openStored(uid, name, liveEvents) { // 이 기기에 저장된 그 학생의 화면 기록 열기
+  function openStored(uid, name, liveEvents, startAt) { // 이 기기에 저장된 그 학생의 화면 기록 열기
     stopPlay();
     cur = { uid: uid, who: name || names[uid] || "학생", frames: [], events: [] };
     $("pName").textContent = cur.who + " — 화면 기록";
@@ -700,7 +699,10 @@
     idbAll(uid).then(function (rows) {
       if (cur !== me) return;
       me.frames = rows.concat(me.frames.filter(function (f) { return !rows.some(function (r) { return r.id === f.id; }); }));
-      syncSeek(); showFrame(me.frames.length - 1); seenInfo();
+      syncSeek();
+      if (startAt) { var si = 0; while (si < me.frames.length - 1 && me.frames[si].t < startAt) si++; showFrame(si); }
+      else showFrame(me.frames.length - 1);
+      seenInfo();
       // 알림 시각: 서버에 남은 상태 변화 기록 + 지금 화면에서 생긴 응답 없음
       var a = me.frames.length ? me.frames[0].t : Date.now(), z = Date.now();
       window.sb.from("study_events").select("kind,at").eq("user_id", uid)
@@ -1191,39 +1193,46 @@
       });
     }
   }
-  function loadStuLog() { // 학생 관리 창 '기록' 탭: 화면 기록 + 최근 14일 기록
+  function idbDays(uid) { // 그 학생의 저장된 화면을 날짜별로 묶음 (장수·처음·마지막)
+    return idb().then(function (db) { return new Promise(function (res, rej) {
+      var out = {}, rq = db.transaction("frames").objectStore("frames").index("uid").openCursor(IDBKeyRange.only(uid));
+      rq.onsuccess = function () {
+        var c = rq.result; if (!c) { res(out); return; }
+        var t = c.value.t, k = keyOf(new Date(t)), o = out[k] = out[k] || { n: 0, a: t, z: t };
+        o.n++; o.a = Math.min(o.a, t); o.z = Math.max(o.z, t); c.continue();
+      };
+      rq.onerror = function () { rej(rq.error); };
+    }); });
+  }
+  function loadStuLog() { // 학생 관리 창 '기록' 탭: 이 학생의 저장된 화면 기록 (날짜별)
     var uid = stuId; if (!uid) return;
-    var name = names[uid] || "학생";
-    var rb = $("uRec"); rb.textContent = "불러오는 중…";
-    idbSummary().then(function (sum) {
+    var name = names[uid] || "학생", box = $("uRec"), btns = $("uRecBtns");
+    box.textContent = "불러오는 중…"; btns.textContent = ""; $("uRecSum").textContent = "";
+    idbDays(uid).then(function (days) {
       if (stuId !== uid) return;
-      rb.textContent = "";
-      var o = sum[uid], txt = document.createElement("span"); txt.style.flex = "1";
-      if (!o) { txt.textContent = "저장된 화면 기록이 없습니다. (관리자 앱이 켜져 있는 동안 학생이 공부하면 자동으로 남습니다)"; rb.append(txt); return; }
-      var d = function (t) { var x = new Date(t); return (x.getMonth() + 1) + "/" + x.getDate() + " " + clock(t).slice(0, 5); };
-      txt.textContent = o.n + "장 · " + d(o.a) + " ~ " + d(o.z);
-      var vb = document.createElement("button"); vb.type = "button"; vb.textContent = "화면 기록 보기";
-      vb.addEventListener("click", function () { openStored(uid, name); });
-      rb.append(txt, vb);
-    }, function (e) { rb.textContent = "화면 기록을 읽지 못했습니다: " + e; });
-    var db = $("uDays"); db.textContent = "불러오는 중…";
-    var from = new Date(); from.setDate(from.getDate() - 13);
-    window.sb.from("study_days").select("user_id,day,study_ms,away_ms,drowsy_ms,break_ms").eq("user_id", uid)
-      .gte("day", keyOf(from)).order("day", { ascending: false }).limit(14).then(function (r) {
-        if (stuId !== uid) return;
-        db.textContent = "";
-        if (r.error) { db.textContent = "기록을 불러오지 못했습니다: " + r.error.message; return; }
-        if (!r.data.length) { db.textContent = "최근 14일 동안 공부 기록이 없습니다."; return; }
-        r.data.forEach(function (x) {
-          var row = document.createElement("div"); row.className = "mrow";
-          var t = document.createElement("span"), dd = new Date(x.day + "T12:00:00");
-          t.textContent = (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ") · 공부 " + fmt(x.study_ms) + " · 자리비움 " + fmt(x.away_ms)
-            + " · 졸음 " + fmt(x.drowsy_ms) + " · 휴식 " + fmt(x.break_ms);
-          var b = document.createElement("button"); b.type = "button"; b.className = "ghost"; b.textContent = "리포트";
-          b.addEventListener("click", function () { loadEvents(x, x.day, name); });
-          row.append(t, b); db.append(row);
-        });
-      }, function (e) { db.textContent = "기록을 불러오지 못했습니다: " + e; });
+      box.textContent = "";
+      var keys = Object.keys(days).sort().reverse(), total = 0;
+      keys.forEach(function (k) { total += days[k].n; });
+      if (!keys.length) { box.textContent = "저장된 화면 기록이 없습니다. 관리자 앱이 켜져 있는 동안 학생이 공부하면 자동으로 남습니다."; return; }
+      $("uRecSum").textContent = "모두 " + total.toLocaleString() + "장 · " + keys.length + "일치 (약 " + Math.max(1, Math.round(total * 12 / 1024)) + "MB)";
+      keys.forEach(function (k) {
+        var o = days[k], dd = new Date(k + "T12:00:00");
+        var row = document.createElement("div"); row.className = "mrow";
+        var t = document.createElement("span");
+        t.textContent = (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ") · " + o.n.toLocaleString() + "장 · " + clock(o.a).slice(0, 5) + " ~ " + clock(o.z).slice(0, 5);
+        var b = document.createElement("button"); b.type = "button"; b.textContent = "보기";
+        b.addEventListener("click", function () { openStored(uid, name, null, o.a); }); // 그날 처음 장면부터
+        row.append(t, b); box.append(row);
+      });
+      var del = document.createElement("button"); del.type = "button"; del.className = "ghost"; del.textContent = "이 학생 화면 기록 모두 지우기";
+      del.addEventListener("click", function () {
+        if (!window.confirm(name + " 님의 저장된 화면 기록 " + total.toLocaleString() + "장을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
+        del.disabled = true;
+        idbAll(uid).then(function (rows) { return idbDelete(rows.map(function (r) { return r.id; })); })
+          .then(function () { checkSpace(); loadRecList(); loadStuLog(); }, function (e) { del.disabled = false; $("uMsg").textContent = "지우기 실패: " + e; });
+      });
+      btns.append(del);
+    }, function (e) { box.textContent = "화면 기록을 읽지 못했습니다: " + e; });
   }
   function stuTab(k) {
     document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.u === k)); });
