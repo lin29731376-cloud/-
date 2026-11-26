@@ -1128,20 +1128,20 @@
             + (p.id === window.smAuth.profile.id ? " 지금 쓰는 관리자 계정이니, 다음 로그인 때 이메일 대신 이 아이디를 입력하세요." : "");
         }, function (e) { b.disabled = false; $("uMsg").textContent = "변경 실패: " + e; });
       });
-    if (p.role !== "admin") {
-      add(p.role === "pending" ? "승인" : "이용 정지", p.role !== "pending", function (b) {
-        b.disabled = true; setRole(p, p.role === "pending" ? "student" : "pending", function (err) { $("uMsg").textContent = err; b.disabled = false; });
-      });
       add("비밀번호 재설정", true, function (b) {
-        var pw = window.prompt(label + " 님의 새 임시 비밀번호를 입력하세요 (6자 이상)");
+        var pw = window.prompt(label + " 님" + (p.role === "admin" ? "(관리자)" : "") + "의 새 비밀번호를 입력하세요 (6자 이상)");
         if (pw === null) return;
         if (pw.length < 6) { $("uMsg").textContent = "비밀번호는 6자 이상이어야 합니다."; return; }
         b.disabled = true; $("uMsg").textContent = "변경 중…";
         window.sb.rpc("admin_set_password", { target: p.id, new_password: pw }).then(function (x) {
           b.disabled = false;
           $("uMsg").textContent = x.error ? "재설정 실패: " + x.error.message
-            : "비밀번호를 바꿨습니다. 임시 비밀번호를 알려주고, 로그인 후 직접 바꾸게 하세요.";
+            : (p.role === "admin" ? "비밀번호를 바꿨습니다. 다음 로그인부터 새 비밀번호를 쓰세요." : "비밀번호를 바꿨습니다. 임시 비밀번호를 알려주고, 로그인 후 직접 바꾸게 하세요.");
         }, function (e) { b.disabled = false; $("uMsg").textContent = "재설정 실패: " + e; });
+      });
+    if (p.role !== "admin") {
+      add(p.role === "pending" ? "승인" : "이용 정지", p.role !== "pending", function (b) {
+        b.disabled = true; setRole(p, p.role === "pending" ? "student" : "pending", function (err) { $("uMsg").textContent = err; b.disabled = false; });
       });
     }
     target = $("uSched"); add("출석 시간 정하기", true, function () { openSched(p.id, label); });
