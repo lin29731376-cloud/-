@@ -714,11 +714,24 @@
     if (lo > 0 && t - fr[lo - 1].t < fr[lo].t - t) lo--;
     return lo;
   }
+  function showBlank(t, from, to) { // 공부를 안 하던 시간: 빈 화면
+    var c = document.createElement("canvas"); c.width = 320; c.height = 240;
+    var g = c.getContext("2d");
+    g.fillStyle = "#e4e6df"; g.fillRect(0, 0, 320, 240);
+    g.fillStyle = "#5b6472"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.font = "bold 22px sans-serif"; g.fillText("공부 안 함", 160, 105);
+    g.font = "15px sans-serif"; g.fillText(clock(from).slice(0, 5) + " ~ " + clock(to).slice(0, 5) + " 기록 없음", 160, 138);
+    if (curUrl) { URL.revokeObjectURL(curUrl); curUrl = null; }
+    $("pImg").src = c.toDataURL("image/png");
+    $("pTime").textContent = clock(t) + " · 공부 안 함";
+    $("pSeek").value = Math.round((t - cur.frames[0].t) / 1000);
+  }
   $("pSeek").addEventListener("input", function () {
     stopPlay(); if (!cur || !cur.frames.length) return;
     var t = cur.frames[0].t + Number($("pSeek").value) * 1000, i = frameAt(t), f = cur.frames[i];
     if (Math.abs(f.t - t) > 10000) { // 기록이 없는 시간(공부를 끝냈던 동안)
-      $("pTime").textContent = clock(t) + " · 기록 없음 (공부 안 함)";
+      var j = f.t > t ? i - 1 : i; // j: 빈 시간 바로 앞 장면
+      showBlank(t, cur.frames[Math.max(0, j)].t, cur.frames[Math.min(cur.frames.length - 1, j + 1)].t);
       return;
     }
     showFrame(i);
@@ -729,8 +742,15 @@
     if (!cur || !cur.frames.length) return;
     if (pos >= cur.frames.length - 1) showFrame(0);
     $("pPlay").textContent = "일시정지";
+    var blankTicks = 0;
     playTimer = setInterval(function () {
       if (!cur || pos >= cur.frames.length - 1) { stopPlay(); return; }
+      var a = cur.frames[pos], b = cur.frames[pos + 1];
+      if (b.t - a.t > 10000 && blankTicks < 6) { // 빈 시간은 빈 화면을 잠깐(1.5초) 보여주고 넘어감
+        if (!blankTicks) showBlank(a.t + (b.t - a.t) / 2, a.t, b.t);
+        blankTicks++; return;
+      }
+      blankTicks = 0;
       showFrame(pos + 1);
     }, 250);
   });
