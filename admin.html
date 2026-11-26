@@ -111,6 +111,12 @@
   .stnav select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff;
     color: var(--ink); max-width: 100%; }
   .sth { font-size: 13px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+  .sth.danger { color: var(--drowsy); }
+  .utabs { display: flex; gap: 6px; margin: 0 0 12px; border-bottom: 1.5px solid #dfe2da; }
+  .utabs button { background: none; color: var(--muted); border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 12px; }
+  .utabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+  .uform { display: grid; grid-template-columns: auto 90px 1fr; gap: 10px 10px; align-items: center; margin: 4px 0 12px; }
+  .uform b { font-size: 15px; } .uform input { width: 90px; } .uform .hint { font-size: 13px; color: var(--muted); }
   .hrow { display: grid; grid-template-columns: minmax(64px, 120px) 1fr auto; gap: 10px; align-items: center; width: 100%;
     padding: 8px 4px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
     color: var(--ink); font-weight: 400; font-size: 14px; text-align: left; cursor: pointer; }
@@ -309,11 +315,30 @@
 <div class="modal" id="stu" hidden>
   <div class="box wide">
     <div class="phead"><b id="uName"></b><button id="uClose" class="ghost">닫기</button></div>
-    <p class="msg" id="uInfo" style="margin:0 0 10px"></p>
-    <div class="prow" id="uGoal" style="align-items:center;gap:8px;margin-bottom:10px"></div>
-    <div class="prow" id="uBreak" style="align-items:center;gap:8px 12px;margin-bottom:10px;flex-wrap:wrap"></div>
-    <div class="prow" id="uActs"></div>
-    <p class="msg" id="uMsg" style="margin:10px 0 0"></p>
+    <p class="msg" id="uInfo" style="margin:0 0 12px"></p>
+    <div class="utabs" role="tablist">
+      <button type="button" data-u="rec" aria-pressed="true">기록·통계</button>
+      <button type="button" data-u="set" aria-pressed="false">공부 설정</button>
+      <button type="button" data-u="acc" aria-pressed="false">계정</button>
+    </div>
+    <p class="msg" id="uMsg" style="margin:0 0 10px"></p>
+
+    <section class="upane" data-u="set" hidden>
+      <div class="uform" id="uForm"></div>
+      <div class="prow" id="uFormBtns"></div>
+      <h3 class="sth">출석 시간</h3>
+      <p class="msg" style="margin:0 0 8px">이 학생이 와야 하는 요일과 시간대를 정하면 출석·지각·결석을 자동으로 판정합니다.</p>
+      <div class="prow" id="uSched"></div>
+    </section>
+
+    <section class="upane" data-u="acc" hidden>
+      <h3 class="sth">이용 상태</h3>
+      <div class="prow" id="uActs"></div>
+      <h3 class="sth danger">삭제 — 되돌릴 수 없음</h3>
+      <div class="prow" id="uDanger"></div>
+    </section>
+
+    <section class="upane" data-u="rec">
     <div id="uStats"></div>
     <div class="bar" id="attHist" style="margin-top:14px">
       <b style="flex-basis:100%">출석 기록 — 위 통계와 같은 기간</b>
@@ -321,6 +346,7 @@
       <div id="ahList" style="flex-basis:100%"></div>
       <span class="msg" id="ahMsg"></span>
     </div>
+    </section>
   </div>
 </div>
 
@@ -1057,10 +1083,11 @@
     var label = p.name || window.smIdOf(p.email) || "회원";
     $("uName").textContent = label + " — 학생 관리";
     $("uInfo").textContent = "아이디 " + window.smIdOf(p.email) + " · " + (ROLE_TEXT[p.role] || p.role) + consentTag(p.id);
-    var acts = $("uActs"); acts.textContent = "";
+    var acts = $("uActs"); acts.textContent = ""; $("uDanger").textContent = ""; $("uSched").textContent = "";
+    var target = acts;
     var add = function (text, ghost, fn) {
       var b = document.createElement("button"); b.type = "button"; b.textContent = text; if (ghost) b.className = "ghost";
-      b.addEventListener("click", function () { fn(b); }); acts.append(b); return b;
+      b.addEventListener("click", function () { fn(b); }); target.append(b); return b;
     };
     if (p.role !== "admin") {
       add(p.role === "pending" ? "승인" : "이용 정지", p.role !== "pending", function (b) {
@@ -1078,72 +1105,57 @@
         }, function (e) { b.disabled = false; $("uMsg").textContent = "재설정 실패: " + e; });
       });
     }
-    add("출석 시간", true, function () { openSched(p.id, label); });
-    // 학생별 하루 목표 공부 시간 (이 창 안에서 바로 입력)
-    var gBox = $("uGoal"); gBox.textContent = ""; gBox.hidden = p.role === "admin";
+    target = $("uSched"); add("출석 시간 정하기", true, function () { openSched(p.id, label); });
+    // 공부 설정: 하루 목표·화장실·식사 휴식 — 기본값과 같으면 전체 기본값을 따름
+    var form = $("uForm"), fb = $("uFormBtns"); form.textContent = ""; fb.textContent = "";
     if (p.role !== "admin") {
-      var base = Number(window.smAuth.settings.goal_hours) || 4, own = Number(p.goal_hours) > 0 ? Number(p.goal_hours) : 0;
-      var lab = document.createElement("b"); lab.textContent = "하루 목표";
-      var inp = document.createElement("input"); inp.type = "number"; inp.min = "0.5"; inp.max = "16"; inp.step = "0.5";
-      inp.value = String(own || base); inp.setAttribute("aria-label", "하루 목표 공부 시간"); inp.style.width = "80px";
-      var unit = document.createElement("span"); unit.textContent = "시간 " + (own ? "(이 학생만 따로)" : "(전체 기본값)");
-      var save = document.createElement("button"); save.type = "button"; save.textContent = "목표 저장";
-      var reset = document.createElement("button"); reset.type = "button"; reset.className = "ghost"; reset.textContent = "기본값(" + base + "시간)으로"; reset.hidden = !own;
-      var put = function (h, btn) {
-        if (h !== null && !(h >= 0.5 && h <= 16)) { $("uMsg").textContent = "0.5에서 16 사이의 시간으로 입력하세요."; return; }
+      var st0 = window.smAuth.settings;
+      var base = { goal: Number(st0.goal_hours) || 4, toilet: Number(st0.toilet_min) || 10, rest: Number(st0.rest_min) || 40 };
+      var own = { goal: Number(p.goal_hours) > 0 ? Number(p.goal_hours) : 0, toilet: Number(p.toilet_min) > 0 ? Number(p.toilet_min) : 0, rest: Number(p.rest_min) > 0 ? Number(p.rest_min) : 0 };
+      var rows = [["goal", "하루 목표", "시간", 0.5, 16, 0.5], ["toilet", "화장실", "분", 1, 60, 1], ["rest", "식사·휴식", "분", 5, 180, 5]], inputs = {};
+      rows.forEach(function (r) {
+        var b2 = document.createElement("b"); b2.textContent = r[1];
+        var i2 = document.createElement("input"); i2.type = "number"; i2.min = r[3]; i2.max = r[4]; i2.step = r[5];
+        i2.value = String(own[r[0]] || base[r[0]]); i2.setAttribute("aria-label", r[1]);
+        var h2 = document.createElement("span"); h2.className = "hint";
+        h2.textContent = r[2] + " · " + (own[r[0]] ? "이 학생만 따로 (기본 " + base[r[0]] + r[2] + ")" : "전체 기본값");
+        inputs[r[0]] = i2; form.append(b2, i2, h2);
+      });
+      var save = document.createElement("button"); save.type = "button"; save.textContent = "저장";
+      var reset = document.createElement("button"); reset.type = "button"; reset.className = "ghost"; reset.textContent = "모두 기본값으로";
+      reset.hidden = !(own.goal || own.toilet || own.rest);
+      var apply = function (v, btn) {
+        var g = v.goal, tl = v.toilet, rs = v.rest;
+        if (g !== null && !(g >= 0.5 && g <= 16)) { $("uMsg").textContent = "하루 목표는 0.5~16시간으로 입력하세요."; return; }
+        if (tl !== null && !(tl >= 1 && tl <= 60)) { $("uMsg").textContent = "화장실은 1~60분으로 입력하세요."; return; }
+        if (rs !== null && !(rs >= 5 && rs <= 180)) { $("uMsg").textContent = "식사·휴식은 5~180분으로 입력하세요."; return; }
         btn.disabled = true; $("uMsg").textContent = "저장 중…";
-        window.sb.rpc("set_goal", { target: p.id, hours: h }).then(function (x) {
-          btn.disabled = false;
-          if (x.error) { $("uMsg").textContent = "저장 실패: " + x.error.message + " (goal.sql을 실행했는지 확인하세요)"; return; }
-          p.goal_hours = h;
-          var t = tiles.get("lk:stu-" + p.id), live = false;
-          try { live = !!(t && t.send && t.send({ cmd: "goal", hours: h || base })); } catch (e) {}
-          fillStu(); renderMembers();
-          $("uMsg").textContent = label + " 님의 목표를 " + (h || base) + "시간으로 정했습니다." + (live ? " 학생 화면에 바로 적용했습니다." : " 학생이 다음에 접속하면 적용됩니다.");
-        }, function (e) { btn.disabled = false; $("uMsg").textContent = "저장 실패: " + e; });
+        var fail = function (m, file) { btn.disabled = false; $("uMsg").textContent = "저장 실패: " + m + " (" + file + "을 실행했는지 확인하세요)"; };
+        window.sb.rpc("set_goal", { target: p.id, hours: g }).then(function (x) {
+          if (x.error) { fail(x.error.message, "goal.sql"); return; }
+          window.sb.rpc("set_student_breaks", { target: p.id, toilet: tl, rest: rs }).then(function (y) {
+            btn.disabled = false;
+            if (y.error) { fail(y.error.message, "student_breaks.sql"); return; }
+            p.goal_hours = g; p.toilet_min = tl; p.rest_min = rs;
+            var t = tiles.get("lk:stu-" + p.id), live = false;
+            try { live = !!(t && t.send && t.send({ cmd: "goal", hours: g || base.goal }) && t.send({ cmd: "cfg", toilet: tl || base.toilet, rest: rs || base.rest })); } catch (e) {}
+            fillStu(); renderMembers();
+            $("uMsg").textContent = "저장했습니다: 목표 " + (g || base.goal) + "시간 · 화장실 " + (tl || base.toilet) + "분 · 식사·휴식 " + (rs || base.rest) + "분."
+              + (live ? " 학생 화면에 바로 적용했습니다." : " 학생이 다음에 접속하면 적용됩니다.");
+          }, function (e) { fail(String(e), "student_breaks.sql"); });
+        }, function (e) { fail(String(e), "goal.sql"); });
       };
-      save.addEventListener("click", function () { put(Number(inp.value), save); });
-      reset.addEventListener("click", function () { put(null, reset); });
-      gBox.append(lab, inp, unit, save, reset);
-
-      // 학생별 화장실·식사 휴식 제한 시간
-      var bBox = $("uBreak"); bBox.textContent = "";
-      var st0 = window.smAuth.settings, bt = Number(st0.toilet_min) || 10, br = Number(st0.rest_min) || 40;
-      var ot = Number(p.toilet_min) > 0 ? Number(p.toilet_min) : 0, or = Number(p.rest_min) > 0 ? Number(p.rest_min) : 0;
-      var mk = function (txt, val, min, max) {
-        var l = document.createElement("label"); l.style.cssText = "display:inline-flex;align-items:center;gap:6px";
-        var b2 = document.createElement("b"); b2.textContent = txt;
-        var i2 = document.createElement("input"); i2.type = "number"; i2.min = String(min); i2.max = String(max); i2.step = "1"; i2.value = String(val); i2.style.width = "70px";
-        var u2 = document.createElement("span"); u2.textContent = "분";
-        l.append(b2, i2, u2); return { l: l, i: i2 };
-      };
-      var fT = mk("화장실", ot || bt, 1, 60), fR = mk("식사·휴식", or || br, 5, 180);
-      var bNote = document.createElement("span"); bNote.className = "msg"; bNote.style.margin = "0";
-      bNote.textContent = ot || or ? "(이 학생만 따로)" : "(전체 기본값)";
-      var bSave = document.createElement("button"); bSave.type = "button"; bSave.textContent = "휴식 시간 저장";
-      var bReset = document.createElement("button"); bReset.type = "button"; bReset.className = "ghost";
-      bReset.textContent = "기본값(" + bt + "분·" + br + "분)으로"; bReset.hidden = !(ot || or);
-      var putB = function (tv, rv, btn) {
-        if (tv !== null && !(tv >= 1 && tv <= 60)) { $("uMsg").textContent = "화장실은 1~60분으로 입력하세요."; return; }
-        if (rv !== null && !(rv >= 5 && rv <= 180)) { $("uMsg").textContent = "식사·휴식은 5~180분으로 입력하세요."; return; }
-        btn.disabled = true; $("uMsg").textContent = "저장 중…";
-        window.sb.rpc("set_student_breaks", { target: p.id, toilet: tv, rest: rv }).then(function (x) {
-          btn.disabled = false;
-          if (x.error) { $("uMsg").textContent = "저장 실패: " + x.error.message + " (student_breaks.sql을 실행했는지 확인하세요)"; return; }
-          p.toilet_min = tv; p.rest_min = rv;
-          var t = tiles.get("lk:stu-" + p.id), live = false;
-          try { live = !!(t && t.send && t.send({ cmd: "cfg", toilet: tv || bt, rest: rv || br })); } catch (e) {}
-          fillStu(); renderMembers();
-          $("uMsg").textContent = label + " 님의 휴식 시간을 화장실 " + (tv || bt) + "분, 식사·휴식 " + (rv || br) + "분으로 정했습니다."
-            + (live ? " 학생 화면에 바로 적용했습니다." : " 학생이 다음에 접속하면 적용됩니다.");
-        }, function (e) { btn.disabled = false; $("uMsg").textContent = "저장 실패: " + e; });
-      };
-      bSave.addEventListener("click", function () { putB(Math.round(Number(fT.i.value)), Math.round(Number(fR.i.value)), bSave); });
-      bReset.addEventListener("click", function () { putB(null, null, bReset); });
-      bBox.append(fT.l, fR.l, bNote, bSave, bReset);
+      save.addEventListener("click", function () {
+        var val = function (k) { var n = Number(inputs[k].value); return n === base[k] ? null : n; }; // 기본값과 같으면 기본값을 따름
+        apply({ goal: val("goal"), toilet: val("toilet") === null ? null : Math.round(val("toilet")), rest: val("rest") === null ? null : Math.round(val("rest")) }, save);
+      });
+      reset.addEventListener("click", function () { apply({ goal: null, toilet: null, rest: null }, reset); });
+      fb.append(save, reset);
+    } else {
+      form.textContent = "관리자 계정에는 공부 설정이 없습니다.";
     }
-    $("uBreak").hidden = p.role === "admin";
     if (p.role !== "admin") {
+      target = $("uDanger");
       add("기록 삭제", true, function (b) { // 공부 기록만 지우고 계정은 남김
         if (!window.confirm(label + " 님의 공부 기록(날짜별 시간, 상태 변화, 출석 판정의 근거)을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
         b.disabled = true; $("uMsg").textContent = "삭제 중…";
@@ -1166,8 +1178,14 @@
       });
     }
   }
+  function stuTab(k) {
+    document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.u === k)); });
+    document.querySelectorAll("#stu .upane").forEach(function (el) { el.hidden = el.dataset.u !== k; });
+    $("uMsg").textContent = "";
+  }
+  document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.addEventListener("click", function () { stuTab(b.dataset.u); }); });
   function openStu(id) {
-    stuId = id; $("uMsg").textContent = ""; fillStu();
+    stuId = id; stuTab("rec"); fillStu();
     $("uStats").append($("statsPanel")); // 통계 칸을 이 창 안으로 옮겨 이 학생 것만 표시
     fillWho(); $("stWho").value = id; renderStats(); renderStuAtt();
     $("stu").hidden = false;
