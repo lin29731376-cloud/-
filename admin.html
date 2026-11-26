@@ -64,7 +64,7 @@
   #pSeenLegend { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
   #pSeenLegend .k { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-left: 6px; }
   #pSeenLegend .k:first-child { margin-left: 0; }
-  #pSeenLegend .st { background: #2b63d9; } #pSeenLegend .aw { background: #e9a514; } #pSeenLegend .dr { background: #d64541; } #pSeenLegend .br { background: #4f8a74; }
+  #pSeenLegend .st { background: #2b63d9; } #pSeenLegend .aw { background: #e9a514; } #pSeenLegend .dr { background: #d64541; } #pSeenLegend .br { background: #4f8a74; } #pSeenLegend .off { background: #d9dcd3; }
   #pSeenPct { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); }
   .prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .prow .msg { flex-basis: auto; }
@@ -270,7 +270,7 @@
     <div id="pTime">—</div>
     <input type="range" id="pSeek" min="0" max="0" value="0" aria-label="시간 이동">
     <canvas id="pSeenBar" height="12" aria-hidden="true"></canvas>
-    <div id="pSeenLegend"><span class="k st"></span>공부 <span class="k aw"></span>자리비움 <span class="k dr"></span>졸음 <span class="k br"></span>휴식</div>
+    <div id="pSeenLegend"><span class="k st"></span>공부 <span class="k aw"></span>자리비움 <span class="k dr"></span>졸음 <span class="k br"></span>휴식 <span class="k off"></span>공부 안 함</div>
     <p id="pSeenPct"></p>
     <div class="prow">
       <button id="pPlay">재생 (8배속)</button>
@@ -561,7 +561,7 @@
   }
   function syncSeek() {
     var n = cur ? cur.frames.length : 0;
-    $("pSeek").max = Math.max(0, n - 1);
+    $("pSeek").max = n ? Math.max(0, Math.round((cur.frames[n - 1].t - cur.frames[0].t) / 1000)) : 0; // 초 단위 (끊긴 시간도 막대에 그대로 보이게)
     $("pInfo").textContent = n ? "기록 " + clock(cur.frames[0].t) + " ~ " + clock(cur.frames[n - 1].t)
                                : "아직 기록이 없습니다. 학생 영상이 연결돼야 기록됩니다.";
     drawSeen();
@@ -572,7 +572,7 @@
     var f = cur.frames[pos];
     if (curUrl) URL.revokeObjectURL(curUrl);
     curUrl = URL.createObjectURL(f.b);
-    $("pImg").src = curUrl; $("pTime").textContent = clock(f.t); $("pSeek").value = pos;
+    $("pImg").src = curUrl; $("pTime").textContent = clock(f.t); $("pSeek").value = Math.round((f.t - cur.frames[0].t) / 1000);
     if (!f.seen) { f.seen = true; seenInfo(); } // 화면에 띄운 장면은 '본 장면'으로 표시
   }
   var ST_COLOR = { study: "#2b63d9", away: "#e9a514", drowsy: "#d64541", break: "#4f8a74", lost: "#e9a514", off: "#e9a514" };
@@ -590,17 +590,22 @@
     g.fillStyle = "#d9dcd3"; g.fillRect(0, 0, w, 12);
     var fr = cur ? cur.frames : [], n = fr.length;
     if (!n) { $("pSeenPct").textContent = ""; return; }
-    var step = w / n, sum = { study: 0, away: 0, drowsy: 0, break: 0 }, cnt = { away: 0, drowsy: 0 }, prev = "";
+    var a0 = fr[0].t, span = Math.max(1, fr[n - 1].t - a0), X = function (t) { return (t - a0) / span * w; }, gaps = 0, gapMs = 0;
+    var sum = { study: 0, away: 0, drowsy: 0, break: 0 }, cnt = { away: 0, drowsy: 0 }, prev = "";
     for (var i = 0; i < n; i++) {
       var st = fr[i].s && ST_COLOR[fr[i].s] ? fr[i].s : fr[i].s === "study" ? "study" : stateAt(fr[i].t), key = st === "lost" || st === "off" ? "away" : st;
-      g.fillStyle = ST_COLOR[st] || "#d9dcd3"; g.fillRect(Math.floor(i * step), 0, Math.ceil(step) + 0.5, 12);
+      var nt = i < n - 1 ? fr[i + 1].t : fr[i].t + 2000, gap = nt - fr[i].t > 10000; // 10초 넘게 비면 공부를 끝냈던 시간
+      var x0 = X(fr[i].t), x1 = gap ? X(fr[i].t + 2000) : X(nt);
+      g.fillStyle = ST_COLOR[st] || "#d9dcd3"; g.fillRect(Math.floor(x0), 0, Math.max(1, Math.ceil(x1 - x0) + 0.5), 12);
+      if (gap && i < n - 1) { gaps++; gapMs += nt - fr[i].t; }
       if (i > 0) { var dt = Math.min(fr[i].t - fr[i - 1].t, 10000); if (sum[key] !== undefined) sum[key] += dt; } // 기록이 끊긴 구간은 10초까지만 셈
       if (key !== prev && cnt[key] !== undefined) cnt[key]++;
       prev = key;
     }
     var m = function (ms) { var s2 = Math.round(ms / 1000); return s2 >= 60 ? Math.floor(s2 / 60) + "분 " + (s2 % 60) + "초" : s2 + "초"; };
     $("pSeenPct").textContent = "이 기록 동안 자리비움 " + cnt.away + "번 · " + m(sum.away) + " / 졸음 " + cnt.drowsy + "번 · " + m(sum.drowsy)
-      + " / 휴식 " + m(sum.break) + " / 공부 " + m(sum.study);
+      + " / 휴식 " + m(sum.break) + " / 공부 " + m(sum.study)
+      + (gaps ? " / 공부 안 함(끝냈다가 다시 들어옴) " + gaps + "번 · " + m(gapMs) : "");
   }
   window.addEventListener("resize", function () { if (cur) drawSeen(); });
   function seenInfo() {
@@ -703,7 +708,21 @@
   $("recReload").addEventListener("click", loadRecList);
   setTimeout(loadRecList, 500);
   $("pClose").addEventListener("click", function () { stopPlay(); cur = null; $("player").hidden = true; });
-  $("pSeek").addEventListener("input", function () { stopPlay(); showFrame(Number($("pSeek").value)); });
+  function frameAt(t) { // 그 시각에 가장 가까운 장면 번호
+    var fr = cur.frames, lo = 0, hi = fr.length - 1;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (fr[mid].t < t) lo = mid + 1; else hi = mid; }
+    if (lo > 0 && t - fr[lo - 1].t < fr[lo].t - t) lo--;
+    return lo;
+  }
+  $("pSeek").addEventListener("input", function () {
+    stopPlay(); if (!cur || !cur.frames.length) return;
+    var t = cur.frames[0].t + Number($("pSeek").value) * 1000, i = frameAt(t), f = cur.frames[i];
+    if (Math.abs(f.t - t) > 10000) { // 기록이 없는 시간(공부를 끝냈던 동안)
+      $("pTime").textContent = clock(t) + " · 기록 없음 (공부 안 함)";
+      return;
+    }
+    showFrame(i);
+  });
   $("pLast").addEventListener("click", function () { stopPlay(); if (cur) showFrame(cur.frames.length - 1); });
   $("pPlay").addEventListener("click", function () {
     if (playTimer) { stopPlay(); return; }
