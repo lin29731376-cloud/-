@@ -177,11 +177,6 @@
         <ol class="log" id="log"><li class="empty">공부를 시작하면 여기에 기록이 쌓입니다.</li></ol>
       </section>
 
-      <details class="sheet">
-        <summary>목표 시간</summary>
-        <label>오늘 목표 <output id="oGoal"></output>
-          <input type="range" id="rGoal" min="1" max="14" step="0.5" value="4"></label>
-      </details>
 
       <!-- 감지 기준은 관리자가 정하므로 화면에 보이지 않음 (계산에 필요한 값만 숨겨 둠) -->
       <div hidden>
@@ -396,7 +391,7 @@ async function connectLink(gen) {
   const me = { room, pub: null };
   room.on(RoomEvent.DataReceived, (payload, from) => { // 관리자가 보낸 명령만 받음
     if (!from || !from.identity.startsWith("admin-")) return;
-    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); else if (d && d.cmd === "cfg") applyCfg(d); } catch (e) {}
+    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); else if (d && d.cmd === "cfg") applyCfg(d); else if (d && d.cmd === "goal") setGoal(d.hours); } catch (e) {}
   });
   room.on(RoomEvent.ParticipantConnected, () => sendStatus());
   room.on(RoomEvent.Disconnected, (reason) => {
@@ -508,6 +503,7 @@ async function initAccount() {
     } catch (e) { say2("변경 실패: " + (e && e.message ? e.message : e), true); }
     $("pwSave").disabled = false;
   });
+  setGoal(profile.goal_hours || settings.goal_hours || 4);
   applyCfg({ away: settings.away_sec, drowsy: settings.drowsy_sec, thr: settings.eye_thr,
              toilet: settings.toilet_min, rest: settings.rest_min });
   try { // 오늘 이미 쌓인 시간이 있으면 이어서 누적
@@ -524,15 +520,13 @@ async function initAccount() {
 if (window.smAuth) initAccount(); else document.addEventListener("sm-ready", initAccount, { once: true });
 
 // --- 오늘 목표 ---
-let goalHours = Number(store.get("sm_goal")) || 4;
-$("rGoal").value = goalHours;
+let goalHours = 4; // 관리자가 정함 (학생별 설정 → 없으면 전체 기본값)
+function setGoal(h) { if (Number(h) > 0) { goalHours = Number(h); renderGoal(); } }
 function renderGoal() {
   const pct = Math.min(100, Math.round(total.study / (goalHours * 3600000) * 100));
-  $("oGoal").textContent = goalHours + "시간";
   $("goalBar").style.width = pct + "%";
   $("goalMsg").textContent = `${fmt(total.study)} / ${goalHours}시간 (${pct}%)` + (pct >= 100 ? " — 목표 달성!" : "");
 }
-$("rGoal").addEventListener("input", () => { goalHours = Number($("rGoal").value); store.set("sm_goal", String(goalHours)); renderGoal(); });
 renderGoal();
 
 // --- 감지 루프 ---

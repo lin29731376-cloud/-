@@ -202,6 +202,8 @@
       <input type="range" id="rToilet" min="1" max="60" step="1" value="10"></label>
     <label class="cfg">식사·휴식 제한 시간 <output id="oRest"></output>
       <input type="range" id="rRest" min="5" max="180" step="5" value="40"></label>
+    <label class="cfg">하루 목표 공부 시간 (기본값, 학생별로 따로 정할 수 있음) <output id="oGoal"></output>
+      <input type="range" id="rGoal" min="0.5" max="16" step="0.5" value="4"></label>
     <button id="cSave">저장</button>
     <span class="msg" id="cMsg"></span>
   </div>
@@ -756,9 +758,10 @@
       loadMemberRows();
     }, function () { cons = null; loadMemberRows(); });
   }
+  function memberOf(id) { var f = null; members.forEach(function (m) { if (m.id === id) f = m; }); return f; }
   var members = [], stuId = null; // members: 전체 회원 목록, stuId: 학생 관리 창에서 보고 있는 회원
   function loadMemberRows() {
-    window.sb.from("profiles").select("id,email,name,role").order("created_at").then(function (r) {
+    window.sb.from("profiles").select("*").order("created_at").then(function (r) {
       if (r.error) { $("members").textContent = ""; $("mMsg").textContent = "회원 목록을 불러오지 못했습니다: " + r.error.message; return; }
       members = r.data || [];
       $("mMsg").textContent = members.length ? "" : "아직 가입한 회원이 없습니다.";
@@ -930,6 +933,26 @@
       });
     }
     add("출석 시간", true, function () { openSched(p.id, label); });
+    if (p.role !== "admin") {
+      var base = Number(window.smAuth.settings.goal_hours) || 4, own = Number(p.goal_hours) > 0 ? Number(p.goal_hours) : 0;
+      add("목표 시간 " + (own ? own + "시간" : "기본 " + base + "시간"), true, function (b) {
+        var v = window.prompt(label + " 님의 하루 목표 공부 시간(시간 단위, 예: 5 또는 6.5)을 입력하세요.\n비워 두고 확인을 누르면 전체 기본값(" + base + "시간)을 따릅니다.", own ? String(own) : "");
+        if (v === null) return;
+        v = v.trim();
+        var h = v === "" ? null : Number(v);
+        if (h !== null && !(h >= 0.5 && h <= 16)) { $("uMsg").textContent = "0.5에서 16 사이의 시간으로 입력하세요."; return; }
+        b.disabled = true; $("uMsg").textContent = "저장 중…";
+        window.sb.rpc("set_goal", { target: p.id, hours: h }).then(function (x) {
+          b.disabled = false;
+          if (x.error) { $("uMsg").textContent = "저장 실패: " + x.error.message + " (goal.sql을 실행했는지 확인하세요)"; return; }
+          p.goal_hours = h;
+          var t = tiles.get("lk:stu-" + p.id), live = false;
+          try { live = !!(t && t.send && t.send({ cmd: "goal", hours: h || base })); } catch (e) {}
+          $("uMsg").textContent = "목표 시간을 " + (h || base) + "시간으로 정했습니다." + (live ? " 학생 화면에 바로 적용했습니다." : " 다음 접속 때 적용됩니다.");
+          fillStu();
+        }, function (e) { b.disabled = false; $("uMsg").textContent = "저장 실패: " + e; });
+      });
+    }
     if (p.role !== "admin") {
       add("기록 삭제", true, function (b) { // 공부 기록만 지우고 계정은 남김
         if (!window.confirm(label + " 님의 공부 기록(날짜별 시간, 상태 변화, 출석 판정의 근거)을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
@@ -1302,8 +1325,9 @@
     $("oThr").textContent = Number($("rThr").value).toFixed(2);
     $("oToilet").textContent = $("rToilet").value + "분";
     $("oRest").textContent = $("rRest").value + "분";
+    $("oGoal").textContent = $("rGoal").value + "시간";
   }
-  ["rAway", "rDrowsy", "rThr", "rToilet", "rRest"].forEach(function (id) { $(id).addEventListener("input", showCfg); });
+  ["rAway", "rDrowsy", "rThr", "rToilet", "rRest", "rGoal"].forEach(function (id) { $(id).addEventListener("input", showCfg); });
   $("cSave").addEventListener("click", function () {
     var cfg = { away: Number($("rAway").value), drowsy: Number($("rDrowsy").value), thr: Number($("rThr").value) };
     var brk = { toilet: Number($("rToilet").value), rest: Number($("rRest").value) };
@@ -1314,9 +1338,21 @@
       window.sb.rpc("set_break_limits", brk).then(function (r2) {
         $("cSave").disabled = false;
         if (r2.error) { fail("휴식 시간 — " + r2.error.message); return; }
-        var sent = 0, msg = { cmd: "cfg", away: cfg.away, drowsy: cfg.drowsy, thr: cfg.thr, toilet: brk.toilet, rest: brk.rest };
-        tiles.forEach(function (t) { try { if (t.send && t.send(msg)) sent++; } catch (e) {} });
-        $("cMsg").textContent = "저장했습니다. 접속 중인 학생 " + sent + "명에게 바로 적용했고, 나머지는 다음 접속 때 적용됩니다.";
+        var goal = Number($("rGoal").value);
+        window.sb.rpc("set_goal", { target: null, hours: goal }).then(function (r3) {
+          $("cSave").disabled = false;
+          if (r3.error) { fail("목표 시간 — " + r3.error.message); return; }
+          window.smAuth.settings.goal_hours = goal;
+          var sent = 0, msg = { cmd: "cfg", away: cfg.away, drowsy: cfg.drowsy, thr: cfg.thr, toilet: brk.toilet, rest: brk.rest };
+          tiles.forEach(function (t, key) {
+            try {
+              if (t.send && t.send(msg)) sent++;
+              var m = memberOf(String(key).replace(/^lk:stu-/, "")); // 학생별 목표가 없는 학생은 새 기본값으로
+              if (t.send && !(m && Number(m.goal_hours) > 0)) t.send({ cmd: "goal", hours: goal });
+            } catch (e) {}
+          });
+          $("cMsg").textContent = "저장했습니다. 접속 중인 학생 " + sent + "명에게 바로 적용했고, 나머지는 다음 접속 때 적용됩니다.";
+        }, function (e) { fail(String(e)); });
       }, function (e) { fail(String(e)); });
     }, function (e) { fail(String(e)); });
   });
@@ -1328,6 +1364,7 @@
     if (Number(st.eye_thr) > 0) $("rThr").value = st.eye_thr;
     if (Number(st.toilet_min) > 0) $("rToilet").value = st.toilet_min;
     if (Number(st.rest_min) > 0) $("rRest").value = st.rest_min;
+    if (Number(st.goal_hours) > 0) $("rGoal").value = st.goal_hours;
     showCfg();
     loadSched();
     $("topic").value = window.smAuth.settings.room_code || "";

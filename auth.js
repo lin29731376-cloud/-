@@ -122,7 +122,7 @@
     try {
       var s = (await sb.auth.getSession()).data.session;
       if (!s) { showForm(); return; }
-      var p = await sb.from("profiles").select("id,email,name,role").eq("id", s.user.id).maybeSingle();
+      var p = await sb.from("profiles").select("*").eq("id", s.user.id).maybeSingle();
       if (p.error) { showWait("계정 정보를 불러오지 못했습니다: " + p.error.message, true); return; }
       if (!p.data) { showWait("계정 정보가 아직 준비되지 않았습니다. 서버 설정(SQL)이 끝났는지 확인하세요.", true); return; }
       if (await needConsent(s.user.id)) { showConsent(); return; }
