@@ -1112,13 +1112,9 @@
       var b = document.createElement("button"); b.type = "button"; b.textContent = text; if (ghost) b.className = "ghost";
       b.addEventListener("click", function () { fn(b); }); target.append(b); return b;
     };
-    if (p.role !== "admin") {
-      add(p.role === "pending" ? "승인" : "이용 정지", p.role !== "pending", function (b) {
-        b.disabled = true; setRole(p, p.role === "pending" ? "student" : "pending", function (err) { $("uMsg").textContent = err; b.disabled = false; });
-      });
       add("아이디 변경", true, function (b) {
         var cur0 = window.smIdOf(p.email);
-        var v = window.prompt(label + " 님의 새 아이디를 입력하세요 (영어 소문자·숫자·밑줄 4~20자)\n지금 아이디: " + cur0, cur0);
+        var v = window.prompt(label + " 님" + (p.role === "admin" ? "(관리자)" : "") + "의 새 아이디를 입력하세요 (영어 소문자·숫자·밑줄 4~20자)\n지금 아이디: " + cur0, cur0);
         if (v === null) return;
         v = v.trim().toLowerCase();
         if (v === cur0) return;
@@ -1128,8 +1124,13 @@
           b.disabled = false;
           if (x.error) { $("uMsg").textContent = "변경 실패: " + x.error.message + (/function|schema/i.test(x.error.message) ? " (change_id.sql을 실행했는지 확인하세요)" : ""); return; }
           p.email = window.smLoginOf(v); fillStu(); renderMembers();
-          $("uMsg").textContent = "아이디를 " + v + "(으)로 바꿨습니다. 다음에 로그인할 때부터 새 아이디를 써야 합니다 (비밀번호는 그대로).";
+          $("uMsg").textContent = "아이디를 " + v + "(으)로 바꿨습니다. 다음에 로그인할 때부터 새 아이디를 써야 합니다 (비밀번호는 그대로)."
+            + (p.id === window.smAuth.profile.id ? " 지금 쓰는 관리자 계정이니, 다음 로그인 때 이메일 대신 이 아이디를 입력하세요." : "");
         }, function (e) { b.disabled = false; $("uMsg").textContent = "변경 실패: " + e; });
+      });
+    if (p.role !== "admin") {
+      add(p.role === "pending" ? "승인" : "이용 정지", p.role !== "pending", function (b) {
+        b.disabled = true; setRole(p, p.role === "pending" ? "student" : "pending", function (err) { $("uMsg").textContent = err; b.disabled = false; });
       });
       add("비밀번호 재설정", true, function (b) {
         var pw = window.prompt(label + " 님의 새 임시 비밀번호를 입력하세요 (6자 이상)");
