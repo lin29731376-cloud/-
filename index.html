@@ -252,7 +252,7 @@ function splitNow() {
     // 주소창이 숨었다 나타나는 정도(약 10%)는 봐줌. 그보다 작아지면 분할 화면·팝업 창
     small = w < f.w * 0.97 || h < f.h * 0.9;
   }
-  return small || !document.hasFocus();
+  return small; // '앱 선택 안 됨(포커스)'은 폰마다 잘못 잡혀서 쓰지 않음 — 창 크기만 봄
 }
 const total = { study: 0, away: 0, drowsy: 0, break: 0 };
 
@@ -600,7 +600,7 @@ function tick() {
 
   if (splitNow()) { if (!splitSince) splitSince = now; } else splitSince = 0;
   let next = "study", w = "";
-  if (splitSince) { next = "away"; w = "분할 화면·다른 앱 사용"; } // 켜자마자 바로
+  if (splitSince && now - splitSince >= 3000) { next = "away"; w = "분할 화면·다른 앱 사용"; } // 3초 넘게 창이 작으면
   else if (now - lastFace >= cfg.away * 1000) next = "away";
   else if (closedSince && now - closedSince >= cfg.drowsy * 1000) { next = "drowsy"; w = "눈 감음"; }
   else if (!hasFace && state !== "study") next = state === "idle" ? "study" : state; // 얼굴이 잠깐 안 잡힐 때는 이전 상태 유지
