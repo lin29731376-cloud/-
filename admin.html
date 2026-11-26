@@ -559,10 +559,14 @@
     var d = new Date(ms), z = function (x) { return String(x).padStart(2, "0"); };
     return z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds());
   }
+  function tEnd() { // 막대의 끝: 오늘 기록이고 지금 공부를 안 하고 있으면 지금 시각까지 (그동안 계속 '공부 안 함'으로 늘어남)
+    var fr = cur.frames, last = fr[fr.length - 1].t, now = Date.now();
+    return now - last > 10000 && new Date(last).toDateString() === new Date(now).toDateString() ? now : last;
+  }
   function syncSeek() {
     var n = cur ? cur.frames.length : 0;
-    $("pSeek").max = n ? Math.max(0, Math.round((cur.frames[n - 1].t - cur.frames[0].t) / 1000)) : 0; // 초 단위 (끊긴 시간도 막대에 그대로 보이게)
-    $("pInfo").textContent = n ? "기록 " + clock(cur.frames[0].t) + " ~ " + clock(cur.frames[n - 1].t)
+    $("pSeek").max = n ? Math.max(0, Math.round((tEnd() - cur.frames[0].t) / 1000)) : 0; // 초 단위 (끊긴 시간도 막대에 그대로 보이게)
+    $("pInfo").textContent = n ? "기록 " + clock(cur.frames[0].t) + " ~ " + clock(tEnd()) + (tEnd() > cur.frames[n - 1].t ? " (지금 공부 안 함)" : "")
                                : "아직 기록이 없습니다. 학생 영상이 연결돼야 기록됩니다.";
     drawSeen();
   }
@@ -590,14 +594,14 @@
     g.fillStyle = "#d9dcd3"; g.fillRect(0, 0, w, 12);
     var fr = cur ? cur.frames : [], n = fr.length;
     if (!n) { $("pSeenPct").textContent = ""; return; }
-    var a0 = fr[0].t, span = Math.max(1, fr[n - 1].t - a0), X = function (t) { return (t - a0) / span * w; }, gaps = 0, gapMs = 0;
+    var end = tEnd(), a0 = fr[0].t, span = Math.max(1, end - a0), X = function (t) { return (t - a0) / span * w; }, gaps = 0, gapMs = 0;
     var sum = { study: 0, away: 0, drowsy: 0, break: 0 }, cnt = { away: 0, drowsy: 0 }, prev = "";
     for (var i = 0; i < n; i++) {
       var st = fr[i].s && ST_COLOR[fr[i].s] ? fr[i].s : fr[i].s === "study" ? "study" : stateAt(fr[i].t), key = st === "lost" || st === "off" ? "away" : st;
-      var nt = i < n - 1 ? fr[i + 1].t : fr[i].t + 2000, gap = nt - fr[i].t > 10000; // 10초 넘게 비면 공부를 끝냈던 시간
+      var nt = i < n - 1 ? fr[i + 1].t : Math.max(end, fr[i].t + 2000), gap = nt - fr[i].t > 10000; // 10초 넘게 비면 공부를 끝냈던 시간
       var x0 = X(fr[i].t), x1 = gap ? X(fr[i].t + 2000) : X(nt);
       g.fillStyle = ST_COLOR[st] || "#d9dcd3"; g.fillRect(Math.floor(x0), 0, Math.max(1, Math.ceil(x1 - x0) + 0.5), 12);
-      if (gap && i < n - 1) { gaps++; gapMs += nt - fr[i].t; }
+      if (gap) { gaps++; gapMs += nt - fr[i].t; }
       if (i > 0) { var dt = Math.min(fr[i].t - fr[i - 1].t, 10000); if (sum[key] !== undefined) sum[key] += dt; } // 기록이 끊긴 구간은 10초까지만 셈
       if (key !== prev && cnt[key] !== undefined) cnt[key]++;
       prev = key;
@@ -605,7 +609,7 @@
     var m = function (ms) { var s2 = Math.round(ms / 1000); return s2 >= 60 ? Math.floor(s2 / 60) + "분 " + (s2 % 60) + "초" : s2 + "초"; };
     $("pSeenPct").textContent = "이 기록 동안 자리비움 " + cnt.away + "번 · " + m(sum.away) + " / 졸음 " + cnt.drowsy + "번 · " + m(sum.drowsy)
       + " / 휴식 " + m(sum.break) + " / 공부 " + m(sum.study)
-      + (gaps ? " / 공부 안 함(끝냈다가 다시 들어옴) " + gaps + "번 · " + m(gapMs) : "");
+      + (gaps ? " / 공부 안 함 " + gaps + "번 · " + m(gapMs) + (end > fr[n - 1].t ? " (지금도 공부 안 하는 중)" : "") : "");
   }
   window.addEventListener("resize", function () { if (cur) drawSeen(); });
   function seenInfo() {
@@ -708,6 +712,10 @@
   $("recReload").addEventListener("click", loadRecList);
   setTimeout(loadRecList, 500);
   $("pClose").addEventListener("click", function () { stopPlay(); cur = null; $("player").hidden = true; });
+  setInterval(function () {
+    if (!cur || $("player").hidden || !cur.frames.length) return;
+    if (Date.now() - cur.frames[cur.frames.length - 1].t > 10000) syncSeek();
+  }, 2000);
   function frameAt(t) { // 그 시각에 가장 가까운 장면 번호
     var fr = cur.frames, lo = 0, hi = fr.length - 1;
     while (lo < hi) { var mid = (lo + hi) >> 1; if (fr[mid].t < t) lo = mid + 1; else hi = mid; }
@@ -731,7 +739,8 @@
     var t = cur.frames[0].t + Number($("pSeek").value) * 1000, i = frameAt(t), f = cur.frames[i];
     if (Math.abs(f.t - t) > 10000) { // 기록이 없는 시간(공부를 끝냈던 동안)
       var j = f.t > t ? i - 1 : i; // j: 빈 시간 바로 앞 장면
-      showBlank(t, cur.frames[Math.max(0, j)].t, cur.frames[Math.min(cur.frames.length - 1, j + 1)].t);
+      var to = j + 1 < cur.frames.length ? cur.frames[j + 1].t : tEnd();
+      showBlank(t, cur.frames[Math.max(0, j)].t, to);
       return;
     }
     showFrame(i);
@@ -746,9 +755,10 @@
     var playT = cur.frames[pos].t;
     playTimer = setInterval(function () {
       if (!cur) { stopPlay(); return; }
-      var fr = cur.frames, last = fr[fr.length - 1].t;
+      var fr = cur.frames, last = fr[fr.length - 1].t, end = tEnd();
       playT += 2000;
-      if (playT > last) { showFrame(fr.length - 1); stopPlay(); return; }
+      if (playT > end) { stopPlay(); return; }
+      if (playT > last + 10000) { showBlank(playT, last, end); return; } // 지금까지 공부 안 하는 중
       var nx = pos + 1 < fr.length ? fr[pos + 1] : null;
       if (nx && nx.t - fr[pos].t > 10000 && playT < nx.t - 1000) { showBlank(playT, fr[pos].t, nx.t); return; } // 빈 시간
       var i = pos; while (i + 1 < fr.length && fr[i + 1].t <= playT + 1000) i++;
