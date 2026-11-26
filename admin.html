@@ -48,8 +48,6 @@
   .tile[data-s="drowsy"] .badge { background: var(--drowsy); }
   .tile[data-s="break"] .badge { background: #3b6ea5; }
   .meta button + button { margin-left: 6px; }
-  .meta em.ai { display: block; font-style: normal; font-size: 12px; color: var(--muted); margin-top: 2px; }
-  .meta em.ai[data-bad="1"] { color: var(--drowsy); font-weight: 600; }
   .meta { padding: 10px 12px; }
   .meta b { display: block; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta span { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -321,9 +319,7 @@
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", lost: "응답 없음", off: "연결 끊김", break: "휴식 중",
-                ai_phone: "AI: 휴대폰 의심", ai_sleeping: "AI: 잠든 것 같음", ai_absent: "AI: 자리에 없음", ai_distracted: "AI: 딴짓 의심" };
-  var AI_TEXT = { studying: "공부 중", phone: "휴대폰 사용 의심", sleeping: "잠든 것 같음", absent: "자리에 없음", distracted: "딴짓 의심", unclear: "판단 어려움" };
+  var LABEL = { study: "공부 중", away: "자리비움", drowsy: "졸음 의심", idle: "대기 중", lost: "응답 없음", off: "연결 끊김", break: "휴식 중" };
   var tiles = new Map(); // 학생 연결 ID -> 타일
   var running = false, audio = null, wakeLock = null;
 
@@ -370,7 +366,7 @@
     var t = tiles.get(id); if (t) return t;
     var el = document.createElement("article"); el.className = "tile";
     el.innerHTML = '<div class="stage"><video autoplay playsinline muted></video><span class="badge"></span></div>' +
-                   '<div class="meta"><b></b><span></span><em class="ai"></em><br><button type="button">기록 보기</button><button type="button" class="wakeBtn">깨우기</button><button type="button" class="repBtn">리포트</button></div>';
+                   '<div class="meta"><b></b><span></span><br><button type="button">기록 보기</button><button type="button" class="wakeBtn">깨우기</button><button type="button" class="repBtn">리포트</button></div>';
     $("grid").append(el);
     t = { el: el, video: el.querySelector("video"), badge: el.querySelector(".badge"),
           name: el.querySelector("b"), times: el.querySelector(".meta span"), last: Date.now(), state: "", who: "",
@@ -411,12 +407,6 @@
     t.times.textContent = "공부 " + fmt(tot.study) + " · 자리비움 " + fmt(tot.away) + " · 졸음 " + fmt(tot.drowsy) + " · 휴식 " + fmt(tot.break);
     setTileState(t, LABEL[d.state] ? d.state : "idle");
     if (d.state === "break" && d.reason) t.badge.textContent = "휴식 중 · " + String(d.reason).slice(0, 10);
-    var aiEl = t.el.querySelector(".ai"); // AI 판단 결과 (1분마다)
-    if (d.ai && d.ai.v && aiEl) {
-      aiEl.textContent = "AI " + clock(d.ai.at).slice(0, 5) + " · " + (AI_TEXT[d.ai.v] || d.ai.v) + (d.ai.reason && d.ai.v !== "studying" ? " — " + d.ai.reason : "");
-      aiEl.dataset.bad = d.ai.v === "studying" || d.ai.v === "unclear" ? "0" : "1";
-      if (aiEl.dataset.bad === "1" && t.aiAt !== d.ai.at) { t.aiAt = d.ai.at; t.events.push({ t: d.ai.at, s: "ai_" + d.ai.v }); }
-    }
   }
 
   setInterval(function () { // 학생 쪽 화면이 꺼지거나 페이지를 닫으면 '응답 없음'
@@ -540,7 +530,7 @@
   function stopPlay() { clearInterval(playTimer); playTimer = null; $("pPlay").textContent = "재생 (8배속)"; }
   function renderEvents() {
     var box = $("pEvents"); box.textContent = "";
-    var list = cur.events.filter(function (e) { return e.s === "away" || e.s === "drowsy" || e.s === "lost" || String(e.s).indexOf("ai_") === 0; });
+    var list = cur.events.filter(function (e) { return e.s === "away" || e.s === "drowsy" || e.s === "lost"; });
     if (!list.length) { box.textContent = "아직 알림이 없습니다."; return; }
     list.forEach(function (e) {
       var b = document.createElement("button"); b.type = "button"; b.dataset.s = e.s;
@@ -630,12 +620,10 @@
   });
 
   // --- 리포트 ---
-  var EVENT_TEXT = { study: "공부 재개", away: "자리비움", drowsy: "졸음 의심", break: "휴식 시작", lost: "응답 없음", off: "연결 끊김",
-                     ai_phone: "AI: 휴대폰 사용 의심", ai_sleeping: "AI: 잠든 것 같음", ai_absent: "AI: 자리에 없음", ai_distracted: "AI: 딴짓 의심" };
+  var EVENT_TEXT = { study: "공부 재개", away: "자리비움", drowsy: "졸음 의심", break: "휴식 시작", lost: "응답 없음", off: "연결 끊김" };
   function openReport(t) {
     var n = { away: 0, drowsy: 0, break: 0, lost: 0 };
     t.events.forEach(function (e) { if (n[e.s] !== undefined) n[e.s]++; });
-    var aiN = t.events.filter(function (e) { return String(e.s).indexOf("ai_") === 0; }).length;
     var tot = t.tot || {}, now = Date.now();
     var lines = [
       "[독서실 리포트] " + (t.who || "학생"),
@@ -646,7 +634,6 @@
       "졸음 의심 " + n.drowsy + "회 · " + fmt(tot.drowsy),
       "휴식 " + n.break + "회 · " + fmt(tot.break),
       "관리자 호출 " + t.wakes + "회",
-      "AI 경고 " + aiN + "회",
     ];
     if (n.lost) lines.push("응답 없음(화면 꺼짐·이탈) " + n.lost + "회");
     lines.push("", "시간대별 기록");
@@ -1011,14 +998,12 @@
         $("hMsg").textContent = "";
         var n = { away: 0, drowsy: 0, break: 0 };
         r.data.forEach(function (e) { if (n[e.kind] !== undefined) n[e.kind]++; });
-        var aiN = r.data.filter(function (e) { return String(e.kind).indexOf("ai_") === 0; }).length;
         var lines = [
           "[독서실 리포트] " + name, day, "",
           "순공부시간 " + fmt(d.study_ms),
           "자리비움 " + n.away + "회 · " + fmt(d.away_ms),
           "졸음 의심 " + n.drowsy + "회 · " + fmt(d.drowsy_ms),
           "휴식 " + n.break + "회 · " + fmt(d.break_ms),
-          "AI 경고 " + aiN + "회",
           "", "시간대별 기록",
         ];
         if (!r.data.length) lines.push("특이사항 없음");

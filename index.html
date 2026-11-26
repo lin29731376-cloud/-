@@ -333,7 +333,7 @@ function sendMsg(obj) { // 관리자에게만 전달
     { reliable: true, destinationIdentities: to }).catch(() => {});
 }
 function sendStatus() {
-  sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "", ai: aiLast });
+  sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "" });
 }
 async function sendVideo() {
   if (!lk || lk.room.state !== "connected" || !stream) return;
@@ -501,40 +501,6 @@ function renderGoal() {
 }
 $("rGoal").addEventListener("input", () => { goalHours = Number($("rGoal").value); store.set("sm_goal", String(goalHours)); renderGoal(); });
 renderGoal();
-
-// --- AI 감시: 1분마다 카메라 사진 한 장을 AI가 보고 공부 중인지 판단 (사진은 저장하지 않음) ---
-const AI_TEXT = { studying: "공부 중", phone: "휴대폰 사용 의심", sleeping: "잠든 것 같음", absent: "자리에 없음",
-                  distracted: "딴짓 의심", unclear: "판단 어려움" };
-const AI_BAD = { phone: 1, sleeping: 1, absent: 1, distracted: 1 };
-let aiLast = null, aiBadRun = 0, aiOff = false, aiBusy = false;
-const aiCanvas = document.createElement("canvas");
-async function aiCheck() {
-  if (!timer || onBreak || aiOff || aiBusy || !window.sb || !stream || video.readyState < 2 || !video.videoWidth) return;
-  aiBusy = true;
-  try {
-    aiCanvas.width = 512; aiCanvas.height = Math.round(512 * video.videoHeight / video.videoWidth);
-    aiCanvas.getContext("2d").drawImage(video, 0, 0, aiCanvas.width, aiCanvas.height);
-    const image = aiCanvas.toDataURL("image/jpeg", 0.6);
-    const r = await window.sb.functions.invoke("ai-judge", { body: { image } });
-    if (r.error || !r.data || !r.data.verdict) {
-      // 서버에 AI 기능이 아직 없으면 조용히 멈춤
-      if (r.error && /not found|404|Failed to send/i.test(String(r.error.message || r.error))) aiOff = true;
-      return;
-    }
-    const v = r.data.verdict;
-    aiLast = { v, reason: r.data.reason || "", at: Date.now() };
-    if (AI_BAD[v]) {
-      aiBadRun++;
-      if (aiBadRun === 2) { // 두 번 연속일 때만 기록·알림 (한 장만으로는 판단하지 않음)
-        addLog("AI: " + AI_TEXT[v] + (aiLast.reason ? " — " + aiLast.reason : ""));
-        saveEvent("ai_" + v); notify("AI: " + AI_TEXT[v], true);
-      }
-    } else if (v === "studying") aiBadRun = 0;
-    sendStatus();
-  } catch (e) { /* 다음 차례에 다시 시도 */ }
-  finally { aiBusy = false; }
-}
-setInterval(aiCheck, 60000);
 
 // --- 감지 루프 ---
 function tick() {
