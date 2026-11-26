@@ -173,7 +173,6 @@
     <button type="button" data-tab="mon" aria-pressed="true">모니터링<span class="tbadge" id="tbMon" hidden></span></button>
     <button type="button" data-tab="att" aria-pressed="false">출석</button>
     <button type="button" data-tab="mem" aria-pressed="false">학생<span class="tbadge" id="tbMem" hidden></span></button>
-    <button type="button" data-tab="rec" aria-pressed="false">기록</button>
     <button type="button" data-tab="set" aria-pressed="false">설정</button>
   </nav>
   <h1>관리자 화면</h1>
@@ -906,10 +905,11 @@
       mon: [bar($("go")), $("summary"), $("grid"), $("empty")],
       att: [bar($("att"))],
       mem: [bar($("members"))],
-      rec: [bar($("hist"))],
+      // 기록 탭은 없앰 (화면 기록은 학생 관리 창 '기록' 탭에서 봄)
       set: [bar($("rAway")), $("updBar")],
     };
     Object.keys(panes).forEach(function (k) { panes[k].forEach(function (el) { if (el) el.setAttribute("data-pane", k); }); });
+    var hb = bar($("hist")); if (hb) hb.style.display = "none";
     var subtitle = document.querySelector("main > .sub");
     function show(k) {
       Object.keys(panes).forEach(function (n) { panes[n].forEach(function (el) {
