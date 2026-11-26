@@ -525,7 +525,7 @@ async function initAccount() {
   });
   setGoal(profile.goal_hours || settings.goal_hours || 4);
   applyCfg({ away: settings.away_sec, drowsy: settings.drowsy_sec, thr: settings.eye_thr,
-             toilet: settings.toilet_min, rest: settings.rest_min });
+             toilet: profile.toilet_min || settings.toilet_min, rest: profile.rest_min || settings.rest_min }); // 학생별 설정이 있으면 그것 우선
   try { // 오늘 이미 쌓인 시간이 있으면 이어서 누적
     const { data } = await window.sb.from("study_days").select("study_ms,away_ms,drowsy_ms,break_ms")
       .eq("user_id", profile.id).eq("day", dayKey).maybeSingle();

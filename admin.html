@@ -311,6 +311,7 @@
     <div class="phead"><b id="uName"></b><button id="uClose" class="ghost">닫기</button></div>
     <p class="msg" id="uInfo" style="margin:0 0 10px"></p>
     <div class="prow" id="uGoal" style="align-items:center;gap:8px;margin-bottom:10px"></div>
+    <div class="prow" id="uBreak" style="align-items:center;gap:8px 12px;margin-bottom:10px;flex-wrap:wrap"></div>
     <div class="prow" id="uActs"></div>
     <p class="msg" id="uMsg" style="margin:10px 0 0"></p>
     <div id="uStats"></div>
@@ -936,7 +937,8 @@
       var who = document.createElement("span");
       var gBase = Number(window.smAuth && window.smAuth.settings.goal_hours) || 4;
       who.textContent = (p.name || "(이름 없음)") + " · " + window.smIdOf(p.email) + " · " + (ROLE_TEXT[p.role] || p.role)
-        + (p.role === "student" ? " · 목표 " + (Number(p.goal_hours) > 0 ? p.goal_hours + "시간(개별)" : gBase + "시간") : "") + consentTag(p.id);
+        + (p.role === "student" ? " · 목표 " + (Number(p.goal_hours) > 0 ? p.goal_hours + "시간(개별)" : gBase + "시간") : "")
+        + (p.role === "student" && (Number(p.toilet_min) > 0 || Number(p.rest_min) > 0) ? " · 휴식 개별" : "") + consentTag(p.id);
       row.append(who);
       if (p.role === "pending") { // 자주 쓰는 승인은 목록에서 바로
         var ab = document.createElement("button"); ab.type = "button"; ab.textContent = "승인";
@@ -1103,7 +1105,44 @@
       save.addEventListener("click", function () { put(Number(inp.value), save); });
       reset.addEventListener("click", function () { put(null, reset); });
       gBox.append(lab, inp, unit, save, reset);
+
+      // 학생별 화장실·식사 휴식 제한 시간
+      var bBox = $("uBreak"); bBox.textContent = "";
+      var st0 = window.smAuth.settings, bt = Number(st0.toilet_min) || 10, br = Number(st0.rest_min) || 40;
+      var ot = Number(p.toilet_min) > 0 ? Number(p.toilet_min) : 0, or = Number(p.rest_min) > 0 ? Number(p.rest_min) : 0;
+      var mk = function (txt, val, min, max) {
+        var l = document.createElement("label"); l.style.cssText = "display:inline-flex;align-items:center;gap:6px";
+        var b2 = document.createElement("b"); b2.textContent = txt;
+        var i2 = document.createElement("input"); i2.type = "number"; i2.min = String(min); i2.max = String(max); i2.step = "1"; i2.value = String(val); i2.style.width = "70px";
+        var u2 = document.createElement("span"); u2.textContent = "분";
+        l.append(b2, i2, u2); return { l: l, i: i2 };
+      };
+      var fT = mk("화장실", ot || bt, 1, 60), fR = mk("식사·휴식", or || br, 5, 180);
+      var bNote = document.createElement("span"); bNote.className = "msg"; bNote.style.margin = "0";
+      bNote.textContent = ot || or ? "(이 학생만 따로)" : "(전체 기본값)";
+      var bSave = document.createElement("button"); bSave.type = "button"; bSave.textContent = "휴식 시간 저장";
+      var bReset = document.createElement("button"); bReset.type = "button"; bReset.className = "ghost";
+      bReset.textContent = "기본값(" + bt + "분·" + br + "분)으로"; bReset.hidden = !(ot || or);
+      var putB = function (tv, rv, btn) {
+        if (tv !== null && !(tv >= 1 && tv <= 60)) { $("uMsg").textContent = "화장실은 1~60분으로 입력하세요."; return; }
+        if (rv !== null && !(rv >= 5 && rv <= 180)) { $("uMsg").textContent = "식사·휴식은 5~180분으로 입력하세요."; return; }
+        btn.disabled = true; $("uMsg").textContent = "저장 중…";
+        window.sb.rpc("set_student_breaks", { target: p.id, toilet: tv, rest: rv }).then(function (x) {
+          btn.disabled = false;
+          if (x.error) { $("uMsg").textContent = "저장 실패: " + x.error.message + " (student_breaks.sql을 실행했는지 확인하세요)"; return; }
+          p.toilet_min = tv; p.rest_min = rv;
+          var t = tiles.get("lk:stu-" + p.id), live = false;
+          try { live = !!(t && t.send && t.send({ cmd: "cfg", toilet: tv || bt, rest: rv || br })); } catch (e) {}
+          fillStu(); renderMembers();
+          $("uMsg").textContent = label + " 님의 휴식 시간을 화장실 " + (tv || bt) + "분, 식사·휴식 " + (rv || br) + "분으로 정했습니다."
+            + (live ? " 학생 화면에 바로 적용했습니다." : " 학생이 다음에 접속하면 적용됩니다.");
+        }, function (e) { btn.disabled = false; $("uMsg").textContent = "저장 실패: " + e; });
+      };
+      bSave.addEventListener("click", function () { putB(Math.round(Number(fT.i.value)), Math.round(Number(fR.i.value)), bSave); });
+      bReset.addEventListener("click", function () { putB(null, null, bReset); });
+      bBox.append(fT.l, fR.l, bNote, bSave, bReset);
     }
+    $("uBreak").hidden = p.role === "admin";
     if (p.role !== "admin") {
       add("기록 삭제", true, function (b) { // 공부 기록만 지우고 계정은 남김
         if (!window.confirm(label + " 님의 공부 기록(날짜별 시간, 상태 변화, 출석 판정의 근거)을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
@@ -1497,8 +1536,11 @@
           var sent = 0, msg = { cmd: "cfg", away: cfg.away, drowsy: cfg.drowsy, thr: cfg.thr, toilet: brk.toilet, rest: brk.rest };
           tiles.forEach(function (t, key) {
             try {
-              if (t.send && t.send(msg)) sent++;
-              var m = memberOf(String(key).replace(/^lk:stu-/, "")); // 학생별 목표가 없는 학생은 새 기본값으로
+              var m = memberOf(String(key).replace(/^lk:stu-/, ""));
+              var own = Object.assign({}, msg);
+              if (m && Number(m.toilet_min) > 0) own.toilet = Number(m.toilet_min);
+              if (m && Number(m.rest_min) > 0) own.rest = Number(m.rest_min);
+              if (t.send && t.send(own)) sent++; // 학생별 목표가 없는 학생은 새 기본값으로
               if (t.send && !(m && Number(m.goal_hours) > 0)) t.send({ cmd: "goal", hours: goal });
             } catch (e) {}
           });
