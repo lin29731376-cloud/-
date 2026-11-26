@@ -742,16 +742,17 @@
     if (!cur || !cur.frames.length) return;
     if (pos >= cur.frames.length - 1) showFrame(0);
     $("pPlay").textContent = "일시정지";
-    var blankTicks = 0;
+    // 실제 시간 흐름대로 재생 (8배속: 0.25초마다 2초씩). 빈 시간도 그 길이만큼 빈 화면으로 보여줌
+    var playT = cur.frames[pos].t;
     playTimer = setInterval(function () {
-      if (!cur || pos >= cur.frames.length - 1) { stopPlay(); return; }
-      var a = cur.frames[pos], b = cur.frames[pos + 1];
-      if (b.t - a.t > 10000 && blankTicks < 6) { // 빈 시간은 빈 화면을 잠깐(1.5초) 보여주고 넘어감
-        if (!blankTicks) showBlank(a.t + (b.t - a.t) / 2, a.t, b.t);
-        blankTicks++; return;
-      }
-      blankTicks = 0;
-      showFrame(pos + 1);
+      if (!cur) { stopPlay(); return; }
+      var fr = cur.frames, last = fr[fr.length - 1].t;
+      playT += 2000;
+      if (playT > last) { showFrame(fr.length - 1); stopPlay(); return; }
+      var nx = pos + 1 < fr.length ? fr[pos + 1] : null;
+      if (nx && nx.t - fr[pos].t > 10000 && playT < nx.t - 1000) { showBlank(playT, fr[pos].t, nx.t); return; } // 빈 시간
+      var i = pos; while (i + 1 < fr.length && fr[i + 1].t <= playT + 1000) i++;
+      if (i !== pos || $("pImg").src.indexOf("data:") === 0) showFrame(i);
     }, 250);
   });
 

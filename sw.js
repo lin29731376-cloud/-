@@ -1,5 +1,5 @@
 // 앱 설치용 최소 서비스 워커: 화면 파일만 캐시해 두고, 서버 통신(로그인·기록·영상)은 항상 네트워크로 보냄
-const CACHE = "sm-v29";
+const CACHE = "sm-v30";
 const SHELL = ["./", "./index.html", "./admin.html", "./terms.html", "./config.js", "./auth.js",
   "./icon-192.png", "./icon-512.png", "./admin-icon-192.png", "./admin-icon-512.png"];
 self.addEventListener("install", (e) => {
