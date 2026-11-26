@@ -231,12 +231,20 @@ const video = $("video"), stage = $("stage"), badge = $("badge"), msg = $("msg")
 let landmarker = null, stream = null, timer = null, audio = null;
 let state = "idle", lastTick = 0, lastFace = 0, closedSince = 0, lastOpen = 0;
 let why = ""; // 감지 이유 (예: 앱 나감)
-// 분할 화면·팝업 창·다른 앱 조작 감지: 휴대폰에서 이 앱 창이 화면의 60%보다 작거나, 다른 앱을 만지느라 이 앱이 5초 넘게 선택되지 않은 상태
+// 분할 화면·팝업 창·다른 앱 조작 감지: 휴대폰에서 이 앱 창이 평소 전체 화면 크기보다 작아지거나,
+// 다른 앱을 만지느라 이 앱이 선택되지 않은 상태가 5초 넘게 이어지면 자리비움
 const isPhone = matchMedia("(pointer: coarse)").matches;
 let splitSince = 0;
+const fullSize = {}; // 가로/세로 방향별로 지금까지 본 가장 큰 창 크기 = 전체 화면
 function splitNow() {
-  const small = isPhone && screen.width && screen.height &&
-    window.innerWidth * window.innerHeight < 0.6 * screen.width * screen.height;
+  let small = false;
+  if (isPhone) {
+    const w = window.innerWidth, h = window.innerHeight, k = w > h ? "land" : "port";
+    const f = fullSize[k] || (fullSize[k] = { w: 0, h: 0 });
+    f.w = Math.max(f.w, w); f.h = Math.max(f.h, h);
+    // 주소창이 숨었다 나타나는 정도(약 10%)는 봐줌. 그보다 작아지면 분할 화면·팝업 창
+    small = w < f.w * 0.97 || h < f.h * 0.9;
+  }
   return small || !document.hasFocus();
 }
 const total = { study: 0, away: 0, drowsy: 0, break: 0 };
