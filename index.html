@@ -95,18 +95,6 @@
   details.sheet[open] summary::after { content: "접기"; }
   details.sheet[open] summary { margin-bottom: 8px; }
 
-  /* 오늘의 시간표: 한 줄 = 1시간, 한 칸 = 10분 */
-  .tt { display: grid; grid-template-columns: 34px repeat(6, 1fr); gap: 3px; font-variant-numeric: tabular-nums; }
-  .tt .h { font-size: 12px; color: var(--muted); text-align: right; padding-right: 6px; line-height: 20px; }
-  .tt i { display: block; height: 20px; border-radius: 3px; background: #eef2f7; }
-  .tt i[data-s="s"] { background: var(--study); }
-  .tt i[data-s="a"] { background: var(--away); }
-  .tt i[data-s="d"] { background: var(--drowsy); }
-  .tt i[data-s="b"] { background: var(--break); }
-  .tt i.now { box-shadow: 0 0 0 2px var(--ink); }
-  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); }
-  .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
-
   .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px; }
   .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .stat span { font-size: 13px; color: var(--muted); }
@@ -133,7 +121,6 @@
   .wake[hidden] { display: none; }
   .wake p { font-size: 28px; font-weight: 700; margin: 0 0 20px; }
   .wake button { font-size: 20px; padding: 14px 44px; background: #fff; color: var(--drowsy); border-color: #fff; }
-  @media (prefers-reduced-motion: no-preference) { .tt i { transition: background-color .4s; } }
 </style>
 </head>
 <body>
@@ -179,14 +166,6 @@
     </section>
 
     <div class="side">
-      <section class="sheet">
-        <h2>오늘의 시간표</h2>
-        <div class="tt" id="tt" role="img" aria-label="10분 단위 오늘 공부 기록"></div>
-        <div class="legend">
-          <span style="--c: var(--study)">공부</span><span style="--c: var(--away)">자리비움</span>
-          <span style="--c: var(--drowsy)">졸음 의심</span><span style="--c: var(--break)">휴식</span>
-        </div>
-      </section>
 
       <section class="sheet">
         <h2>오늘 기록</h2>
@@ -529,41 +508,6 @@ function renderGoal() {
 }
 $("rGoal").addEventListener("input", () => { goalHours = Number($("rGoal").value); store.set("sm_goal", String(goalHours)); renderGoal(); });
 renderGoal();
-
-// --- 오늘의 시간표: 1분마다 지금 상태를 이 기기에 기록하고 10분 칸으로 칠함 ---
-const TT_CODE = { study: "s", away: "a", drowsy: "d", break: "b" };
-const ttKey = () => { const d = new Date(), z = (n) => String(n).padStart(2, "0"); return "sm_tt_" + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()); };
-function ttLoad() { try { return JSON.parse(localStorage.getItem(ttKey()) || "{}"); } catch (e) { return {}; } }
-function ttRecord() {
-  if (!timer || !TT_CODE[state]) return;
-  const d = new Date(), m = d.getHours() * 60 + d.getMinutes(), map = ttLoad();
-  map[m] = TT_CODE[state];
-  try { localStorage.setItem(ttKey(), JSON.stringify(map)); } catch (e) { /* 저장 공간이 없으면 표시만 생략 */ }
-  ttRender(map);
-}
-function ttRender(map) {
-  map = map || ttLoad();
-  const box = $("tt"); if (!box) return;
-  const now = new Date(), nowH = now.getHours(), nowSlot = nowH * 6 + Math.floor(now.getMinutes() / 10);
-  const mins = Object.keys(map).map(Number);
-  let first = Math.min(8, nowH, ...(mins.length ? mins.map((x) => Math.floor(x / 60)) : [24]));
-  let last = Math.max(first + 5, nowH, ...(mins.length ? mins.map((x) => Math.floor(x / 60)) : [0]));
-  box.textContent = "";
-  for (let h = first; h <= last; h++) {
-    const lab = document.createElement("span"); lab.className = "h"; lab.textContent = h; box.append(lab);
-    for (let k = 0; k < 6; k++) {
-      const cnt = {}; // 10분 안에서 가장 많이 기록된 상태로 칠함
-      for (let x = 0; x < 10; x++) { const c = map[h * 60 + k * 10 + x]; if (c) cnt[c] = (cnt[c] || 0) + 1; }
-      const best = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
-      const cell = document.createElement("i");
-      if (best) cell.dataset.s = best;
-      if (h * 6 + k === nowSlot) cell.className = "now";
-      box.append(cell);
-    }
-  }
-}
-window.smTtRender = () => ttRender(); // 화면 갱신용
-ttRender(); setInterval(ttRecord, 20000); setInterval(() => ttRender(), 60000);
 
 // --- 감지 루프 ---
 function tick() {
