@@ -406,7 +406,8 @@
     var tot = d.total || {}; t.tot = tot;
     t.times.textContent = "공부 " + fmt(tot.study) + " · 자리비움 " + fmt(tot.away) + " · 졸음 " + fmt(tot.drowsy) + " · 휴식 " + fmt(tot.break);
     setTileState(t, LABEL[d.state] ? d.state : "idle");
-    if (d.state === "break" && d.reason) t.badge.textContent = "휴식 중 · " + String(d.reason).slice(0, 10);
+    if ((d.state === "break" || d.state === "away" || d.state === "drowsy") && d.reason)
+      t.badge.textContent = LABEL[d.state] + " · " + String(d.reason).slice(0, 10);
   }
 
   setInterval(function () { // 학생 쪽 화면이 꺼지거나 페이지를 닫으면 '응답 없음'

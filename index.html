@@ -231,6 +231,38 @@ const $ = (id) => document.getElementById(id);
 const video = $("video"), stage = $("stage"), badge = $("badge"), msg = $("msg"), faceTag = $("faceTag");
 let landmarker = null, stream = null, timer = null, audio = null;
 let state = "idle", lastTick = 0, lastFace = 0, closedSince = 0, lastOpen = 0;
+// 엄격 감지: 고개 숙임, 카메라 가림, 화면 멈춤(사진·정지 화면), 앱 나감
+let why = "", pitchBase = null, pitchSamples = [], headDownSince = 0;
+let darkSince = 0, lastBlink = 0, stillSince = 0, prevPix = null, nosePath = [];
+const HEAD_DOWN_DEG = 35, HEAD_DOWN_MIN_S = 20, DARK_S = 10, FROZEN_S = 60;
+const pixCanvas = document.createElement("canvas"); pixCanvas.width = 32; pixCanvas.height = 24;
+const pixCtx = pixCanvas.getContext("2d", { willReadFrequently: true });
+function resetStrict() {
+  why = ""; pitchBase = null; pitchSamples = []; headDownSince = 0;
+  darkSince = 0; lastBlink = Date.now(); stillSince = 0; prevPix = null; nosePath = [];
+}
+function headPitch(lm) { // 이마(10)→턱(152) 기울기로 고개를 앞으로 숙인 정도(도)를 계산. 클수록 숙임
+  const a = lm[10], b = lm[152];
+  const dy = (b.y - a.y) * (video.videoHeight / video.videoWidth), dz = b.z - a.z;
+  return Math.atan2(dz, dy) * 180 / Math.PI;
+}
+function pixelCheck(now) { // 1초마다 아주 작은 화면으로 밝기와 움직임을 잼
+  try {
+    pixCtx.drawImage(video, 0, 0, 32, 24);
+    const d = pixCtx.getImageData(0, 0, 32, 24).data;
+    let sum = 0, diff = 0;
+    const cur = new Uint8Array(32 * 24);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      cur[j] = (d[i] + d[i + 1] + d[i + 2]) / 3; sum += cur[j];
+      if (prevPix) diff += Math.abs(cur[j] - prevPix[j]);
+    }
+    const bright = sum / cur.length, move = prevPix ? diff / cur.length : 99;
+    prevPix = cur;
+    if (bright < 18) { if (!darkSince) darkSince = now; } else darkSince = 0;
+    return move;
+  } catch (e) { return 99; }
+}
+let lastPix = 0;
 const total = { study: 0, away: 0, drowsy: 0, break: 0 };
 
 // --- 설정 슬라이더 ---
@@ -290,12 +322,12 @@ function beep() {
 function setState(next) {
   if (next === state) return;
   const prev = state; state = next;
-  badge.textContent = LABEL[next]; badge.dataset.s = next; stage.dataset.s = next;
+  badge.textContent = LABEL[next] + (why && (next === "away" || next === "drowsy") ? " · " + why : ""); badge.dataset.s = next; stage.dataset.s = next;
   if (next === "idle") return;
   saveEvent(next);
   if (next === "study") addLog(prev === "idle" ? "공부 시작" : `복귀 (${LABEL[prev]} 해제)`);
   else if (next === "break") addLog(`휴식 시작 (${breakReason})`);
-  else { addLog(`${LABEL[next]} 감지`); beep(); notify(`${LABEL[next]} 감지`, true); }
+  else { const w = why ? ` (${why})` : ""; addLog(`${LABEL[next]} 감지${w}`); beep(); notify(`${LABEL[next]} 감지${w}`, true); }
 }
 
 // --- 관리자 알림 (ntfy.sh 로 전송) ---
@@ -311,7 +343,7 @@ async function notify(what, urgent) {
   const at = clockNow();
   try {
     const r = await fetch("https://ntfy.sh/", {
-      method: "POST",
+      method: "POST", keepalive: true,
       body: JSON.stringify({ topic, title: `${who} — ${what}`, message: `${at} 독서실 모니터`,
                              priority: urgent ? 4 : 3, tags: [urgent ? "warning" : "bell"] }),
     });
@@ -333,7 +365,7 @@ function sendMsg(obj) { // 관리자에게만 전달
     { reliable: true, destinationIdentities: to }).catch(() => {});
 }
 function sendStatus() {
-  sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : "" });
+  sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : (state === "away" || state === "drowsy") ? why : "" });
 }
 async function sendVideo() {
   if (!lk || lk.room.state !== "connected" || !stream) return;
@@ -511,6 +543,7 @@ function tick() {
   try { res = landmarker.detectForVideo(video, performance.now()); }
   catch (e) { console.error(e); say("[영상 분석 실패] " + (e && e.message ? e.message : e), true); return; }
 
+  if (document.visibilityState === "hidden" && !onBreak) return; // 앱이 내려가 있는 동안은 자리비움 유지 (돌아오면 그 시간을 자리비움으로 기록)
   const dt = now - lastTick; lastTick = now;
   if (dt > 3000) { // 화면 꺼짐·앱 전환 등으로 분석이 끊긴 시간은 자리비움으로 기록
     total[onBreak ? "break" : "away"] += dt; lastFace = now; closedSince = 0;
@@ -531,6 +564,32 @@ function tick() {
     closedSince = 0;
   }
   $("eyeBar").style.width = Math.round(eye * 100) + "%";
+  if (eye >= 0.45) lastBlink = now; // 눈을 깜빡인 적이 있는지 (사진·정지 화면은 깜빡이지 않음)
+
+  // 고개 숙임: 처음 20초 동안의 평소 자세를 기준으로, 기준보다 35도 넘게 숙인 채 20초 이상이면 졸음 의심
+  if (hasFace) {
+    const p = headPitch(res.faceLandmarks[0]);
+    if (pitchBase === null) {
+      pitchSamples.push(p);
+      if (pitchSamples.length >= 100) { const s = pitchSamples.slice().sort((x, y) => x - y); pitchBase = s[50]; }
+    } else if (p - pitchBase > HEAD_DOWN_DEG) { if (!headDownSince) headDownSince = now; }
+    else headDownSince = 0;
+    const n = res.faceLandmarks[0][1];
+    nosePath.push({ t: now, x: n.x, y: n.y });
+    while (nosePath.length && now - nosePath[0].t > FROZEN_S * 1000) nosePath.shift();
+  } else headDownSince = 0;
+
+  // 카메라 가림·화면 멈춤
+  let move = 99;
+  if (now - lastPix >= 1000) { lastPix = now; move = pixelCheck(now); 
+    if (move < 1.2) { if (!stillSince) stillSince = now; } else stillSince = 0; }
+  let frozen = false;
+  if (hasFace && stillSince && now - stillSince >= FROZEN_S * 1000 && now - lastBlink >= FROZEN_S * 1000 && nosePath.length > 10) {
+    let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+    nosePath.forEach((q) => { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); });
+    frozen = x1 - x0 < 0.004 && y1 - y0 < 0.004; // 1분 동안 얼굴이 전혀 안 움직이고 한 번도 깜빡이지 않음
+  }
+  const covered = darkSince && now - darkSince >= DARK_S * 1000;
 
   if (onBreak) { // 휴식 중에는 자리비움·졸음으로 세지 않음. 자리를 떴다가 돌아오면 자동으로 공부 재개
     if (!hasFace) { if (!goneSince) goneSince = now; if (now - goneSince > 5000) breakLeft = true; }
@@ -548,10 +607,14 @@ function tick() {
     }
   }
 
-  let next = "study";
-  if (now - lastFace >= cfg.away * 1000) next = "away";
-  else if (closedSince && now - closedSince >= cfg.drowsy * 1000) next = "drowsy";
+  let next = "study", w = "";
+  if (covered) { next = "away"; w = "카메라 가림"; }
+  else if (frozen) { next = "away"; w = "화면 멈춤·사진 의심"; }
+  else if (now - lastFace >= cfg.away * 1000) next = "away";
+  else if (closedSince && now - closedSince >= cfg.drowsy * 1000) { next = "drowsy"; w = "눈 감음"; }
+  else if (headDownSince && now - headDownSince >= Math.max(HEAD_DOWN_MIN_S, cfg.drowsy) * 1000) { next = "drowsy"; w = "고개 숙임"; }
   else if (!hasFace && state !== "study") next = state === "idle" ? "study" : state; // 얼굴이 잠깐 안 잡힐 때는 이전 상태 유지
+  if (next !== state) why = w;
   setState(next);
   renderTotals();
 }
@@ -582,8 +645,18 @@ async function keepAwake() { // 공부 중 화면이 자동으로 꺼지지 않�
   try { if ("wakeLock" in navigator && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen"); }
   catch (e) { /* 지원하지 않는 기기는 무시 */ }
 }
+let leftAt = 0;
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && timer) { keepAwake(); recover(); }
+  if (!timer) return;
+  if (document.visibilityState === "hidden") { // 공부 중 앱을 내리거나 다른 앱을 켜면 바로 기록·알림
+    if (onBreak) return;
+    leftAt = Date.now(); why = "앱 나감";
+    setState("away"); sendStatus();
+  } else {
+    if (leftAt) { addLog(`앱으로 돌아옴 (${Math.round((Date.now() - leftAt) / 1000)}초 나가 있었음)`); leftAt = 0; }
+    prevPix = null; stillSince = 0; darkSince = 0; lastBlink = Date.now();
+    keepAwake(); recover();
+  }
 });
 
 // --- 시작 / 중지 ---
@@ -615,7 +688,7 @@ $("start").addEventListener("click", async () => {
       });
     }
     const now = Date.now();
-    lastTick = now; lastFace = now; closedSince = 0;
+    lastTick = now; lastFace = now; closedSince = 0; resetStrict();
     badge.hidden = false; faceTag.hidden = false; faceTag.textContent = "확인 중…"; setState("study");
     timer = setInterval(tick, 200); // 초당 5회면 충분
     keepAwake(); startLink(); breakButtons();
