@@ -231,6 +231,14 @@ const video = $("video"), stage = $("stage"), badge = $("badge"), msg = $("msg")
 let landmarker = null, stream = null, timer = null, audio = null;
 let state = "idle", lastTick = 0, lastFace = 0, closedSince = 0, lastOpen = 0;
 let why = ""; // 감지 이유 (예: 앱 나감)
+// 분할 화면·팝업 창·다른 앱 조작 감지: 휴대폰에서 이 앱 창이 화면의 60%보다 작거나, 다른 앱을 만지느라 이 앱이 5초 넘게 선택되지 않은 상태
+const isPhone = matchMedia("(pointer: coarse)").matches;
+let splitSince = 0;
+function splitNow() {
+  const small = isPhone && screen.width && screen.height &&
+    window.innerWidth * window.innerHeight < 0.6 * screen.width * screen.height;
+  return small || !document.hasFocus();
+}
 const total = { study: 0, away: 0, drowsy: 0, break: 0 };
 
 // --- 설정 슬라이더 ---
@@ -573,8 +581,10 @@ function tick() {
     }
   }
 
+  if (splitNow()) { if (!splitSince) splitSince = now; } else splitSince = 0;
   let next = "study", w = "";
-  if (now - lastFace >= cfg.away * 1000) next = "away";
+  if (splitSince && now - splitSince >= 5000) { next = "away"; w = "분할 화면·다른 앱 사용"; }
+  else if (now - lastFace >= cfg.away * 1000) next = "away";
   else if (closedSince && now - closedSince >= cfg.drowsy * 1000) { next = "drowsy"; w = "눈 감음"; }
   else if (!hasFace && state !== "study") next = state === "idle" ? "study" : state; // 얼굴이 잠깐 안 잡힐 때는 이전 상태 유지
   if (next !== state) why = w;
@@ -660,7 +670,7 @@ $("start").addEventListener("click", async () => {
       if (!landmarker) throw lastErr || new Error("얼굴 인식 도구를 불러오지 못했습니다");
     }
     const now = Date.now();
-    lastTick = now; lastFace = now; closedSince = 0; why = "";
+    lastTick = now; lastFace = now; closedSince = 0; why = ""; splitSince = 0;
     badge.hidden = false; faceTag.hidden = false; faceTag.textContent = "확인 중…"; setState("study");
     timer = setInterval(tick, 200); // 초당 5회면 충분
     keepAwake(); startLink(); breakButtons();
