@@ -15,7 +15,7 @@
     ".authcard .amsg{font-size:14px;color:var(--muted);margin:14px 0 0;min-height:1.5em}.authcard .amsg.err{color:var(--drowsy)}";
   document.head.append(css);
 
-  function card(inner) { box.innerHTML = '<div class="authcard"><h1>독서실 모니터</h1>' + inner + "</div>"; box.hidden = false; app.hidden = true; }
+  function card(inner) { box.innerHTML = '<div class="authcard"><h1>바른결 관리형 독서실</h1>' + inner + "</div>"; box.hidden = false; app.hidden = true; }
   function q(id) { return document.getElementById(id); }
   function msg(text, err) { var m = q("aMsg"); if (m) { m.textContent = text || ""; m.classList.toggle("err", !!err); } }
 
