@@ -503,10 +503,17 @@
       if (v.paused) { try { v.play().catch(function () {}); } catch (e) {} }
       canvas.width = 320; canvas.height = Math.round(320 * v.videoHeight / v.videoWidth);
       try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch (e) { return; }
-      var at = Date.now();
+      var at = Date.now(), st = t.state;
+      if (st !== "study") { // 공부 중이 아니면 화면에 상태를 찍어 둠 (테두리 + 상단 띠)
+        var col = ST_COLOR[st] || "#6b7280", label = (t.badge && t.badge.textContent) || LABEL[st] || st;
+        ctx.lineWidth = 8; ctx.strokeStyle = col; ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+        ctx.fillStyle = col; ctx.fillRect(0, 0, canvas.width, 30);
+        ctx.fillStyle = "#fff"; ctx.font = "bold 17px sans-serif"; ctx.textBaseline = "middle";
+        ctx.fillText(label + "  " + clock(at), 10, 16);
+      }
       canvas.toBlob(function (b) {
         if (!b) return;
-        var row = { uid: uid, name: t.who || names[uid] || "", t: at, b: b };
+        var row = { uid: uid, name: t.who || names[uid] || "", t: at, b: b, s: st };
         idb().then(function (db) {
           var rq = db.transaction("frames", "readwrite").objectStore("frames").add(row);
           rq.onerror = function () { rec.err = String(rq.error && (rq.error.name + ": " + rq.error.message) || "저장 오류"); recStatus(); };
@@ -566,7 +573,7 @@
     if (!n) { $("pSeenPct").textContent = ""; return; }
     var step = w / n, sum = { study: 0, away: 0, drowsy: 0, break: 0 }, cnt = { away: 0, drowsy: 0 }, prev = "";
     for (var i = 0; i < n; i++) {
-      var st = stateAt(fr[i].t), key = st === "lost" || st === "off" ? "away" : st;
+      var st = fr[i].s && ST_COLOR[fr[i].s] ? fr[i].s : fr[i].s === "study" ? "study" : stateAt(fr[i].t), key = st === "lost" || st === "off" ? "away" : st;
       g.fillStyle = ST_COLOR[st] || "#d9dcd3"; g.fillRect(Math.floor(i * step), 0, Math.ceil(step) + 0.5, 12);
       if (i > 0) { var dt = Math.min(fr[i].t - fr[i - 1].t, 10000); if (sum[key] !== undefined) sum[key] += dt; } // 기록이 끊긴 구간은 10초까지만 셈
       if (key !== prev && cnt[key] !== undefined) cnt[key]++;
