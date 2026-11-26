@@ -60,6 +60,12 @@
   #pImg { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #1f2a2e; border-radius: 8px; display: block; }
   #pTime { font-variant-numeric: tabular-nums; font-weight: 700; margin-top: 8px; }
   #pSeek { width: 100%; accent-color: var(--ink); }
+  #pSeenBar { display: block; width: 100%; height: 12px; border-radius: 6px; margin: 2px 0 4px; }
+  #pSeenLegend { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  #pSeenLegend .k { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-left: 6px; }
+  #pSeenLegend .k:first-child { margin-left: 0; }
+  #pSeenLegend .seen { background: #2b9a66; } #pSeenLegend .unseen { background: #d9dcd3; } #pSeenLegend .alert { background: #e9a514; }
+  #pSeenLegend b { margin-left: auto; color: var(--ink); }
   .prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .prow .msg { flex-basis: auto; }
   .ptitle { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
@@ -263,6 +269,8 @@
     <img id="pImg" alt="기록된 화면">
     <div id="pTime">—</div>
     <input type="range" id="pSeek" min="0" max="0" value="0" aria-label="시간 이동">
+    <canvas id="pSeenBar" height="12" aria-hidden="true"></canvas>
+    <div id="pSeenLegend"><span class="k seen"></span>본 부분 <span class="k unseen"></span>안 본 부분 <span class="k alert"></span>알림 <b id="pSeenPct"></b></div>
     <div class="prow">
       <button id="pPlay">재생 (8배속)</button>
       <button id="pLast" class="ghost">최신으로</button>
@@ -529,6 +537,7 @@
     $("pSeek").max = Math.max(0, n - 1);
     $("pInfo").textContent = n ? "기록 " + clock(cur.frames[0].t) + " ~ " + clock(cur.frames[n - 1].t)
                                : "아직 기록이 없습니다. 학생 영상이 연결돼야 기록됩니다.";
+    drawSeen();
   }
   function showFrame(i) {
     if (!cur || !cur.frames.length) return;
@@ -539,7 +548,29 @@
     $("pImg").src = curUrl; $("pTime").textContent = clock(f.t); $("pSeek").value = pos;
     if (!f.seen) { f.seen = true; seenInfo(); } // 화면에 띄운 장면은 '본 장면'으로 표시
   }
+  function drawSeen() { // 시간 막대 아래에 본 부분(초록)·안 본 부분(회색)·알림 시각(노랑)을 그림
+    var cv = $("pSeenBar"), w = cv.clientWidth || 300, dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(12 * dpr);
+    var g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.fillStyle = "#d9dcd3"; g.fillRect(0, 0, w, 12);
+    var fr = cur ? cur.frames : [], n = fr.length, seen = 0;
+    if (!n) { $("pSeenPct").textContent = ""; return; }
+    var step = w / n;
+    g.fillStyle = "#2b9a66";
+    for (var i = 0; i < n; i++) if (fr[i].seen) { seen++; g.fillRect(Math.floor(i * step), 0, Math.ceil(step) + 0.5, 12); }
+    if (cur.events && cur.events.length && n > 1) { // 알림 시각 표시
+      var a = fr[0].t, z = fr[n - 1].t;
+      g.fillStyle = "#e9a514";
+      cur.events.forEach(function (e) {
+        if (e.s === "study" || e.s === "break" || e.t < a || e.t > z) return;
+        var x = (e.t - a) / (z - a) * w; g.fillRect(Math.max(0, x - 1.5), 0, 3, 12);
+      });
+    }
+    $("pSeenPct").textContent = "본 범위 " + Math.round(seen / n * 100) + "% (" + seen + "/" + n + "장)";
+  }
+  window.addEventListener("resize", function () { if (cur) drawSeen(); });
   function seenInfo() {
+    drawSeen();
     var n = 0; if (cur) cur.frames.forEach(function (f) { if (f.seen) n++; });
     $("pSeenInfo").textContent = n ? "본 장면 " + n + "장 (안 본 장면은 남습니다)" : "";
     $("pDelSeen").disabled = !n;
@@ -596,7 +627,7 @@
           if (cur !== me) return;
           var ev = ((r && r.data) || []).map(function (e) { return { t: new Date(e.at).getTime(), s: e.kind }; });
           (liveEvents || []).forEach(function (e) { if (e.s === "lost") ev.push(e); });
-          me.events = ev.sort(function (x, y) { return x.t - y.t; }); renderEvents();
+          me.events = ev.sort(function (x, y) { return x.t - y.t; }); renderEvents(); drawSeen();
         }, function () { if (cur === me) { me.events = liveEvents || []; renderEvents(); } });
     }, function (e) { $("pInfo").textContent = "화면 기록을 불러오지 못했습니다: " + e; });
   }
