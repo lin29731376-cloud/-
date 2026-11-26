@@ -54,6 +54,7 @@
   button.ghost { background: transparent; color: var(--ink); }
   .meta button { margin-top: 8px; padding: 6px 12px; font-size: 13px; background: transparent; color: var(--ink); }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 12px; z-index: 10; }
+  #player, #report { z-index: 20; } /* 학생 관리 창 위에 열림 */
   .modal[hidden] { display: none; }
   .box { background: var(--panel); border-radius: 12px; padding: 14px; width: min(640px, 100%); max-height: 100%; overflow: auto; }
   .phead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -317,11 +318,20 @@
     <div class="phead"><b id="uName"></b><button id="uClose" class="ghost">닫기</button></div>
     <p class="msg" id="uInfo" style="margin:0 0 12px"></p>
     <div class="utabs" role="tablist">
-      <button type="button" data-u="rec" aria-pressed="true">기록·통계</button>
+      <button type="button" data-u="rec" aria-pressed="true">통계·출석</button>
+      <button type="button" data-u="log" aria-pressed="false">기록</button>
       <button type="button" data-u="set" aria-pressed="false">공부 설정</button>
       <button type="button" data-u="acc" aria-pressed="false">계정</button>
     </div>
     <p class="msg" id="uMsg" style="margin:0 0 10px"></p>
+
+    <section class="upane" data-u="log" hidden>
+      <h3 class="sth">화면 기록 — 이 기기에 저장된 2초 간격 화면</h3>
+      <div class="prow" id="uRec" style="align-items:center"></div>
+      <h3 class="sth">날짜별 공부 기록 — 최근 14일</h3>
+      <p class="msg" style="margin:0 0 6px">「리포트」를 누르면 그날의 시간대별 기록이 나오고, 복사해서 학부모에게 보낼 수 있습니다.</p>
+      <div id="uDays"></div>
+    </section>
 
     <section class="upane" data-u="set" hidden>
       <div class="uform" id="uForm"></div>
@@ -739,7 +749,10 @@
   }
   $("recReload").addEventListener("click", loadRecList);
   setTimeout(loadRecList, 500);
-  $("pClose").addEventListener("click", function () { stopPlay(); cur = null; $("player").hidden = true; });
+  $("pClose").addEventListener("click", function () {
+    stopPlay(); cur = null; $("player").hidden = true;
+    if (stuId && !$("stu").hidden) loadStuLog(); // 학생 관리 창에서 열었으면 장수 다시 표시
+  });
   setInterval(function () {
     if (!cur || $("player").hidden || !cur.frames.length) return;
     if (Date.now() - cur.frames[cur.frames.length - 1].t > 10000) syncSeek();
@@ -1178,10 +1191,45 @@
       });
     }
   }
+  function loadStuLog() { // 학생 관리 창 '기록' 탭: 화면 기록 + 최근 14일 기록
+    var uid = stuId; if (!uid) return;
+    var name = names[uid] || "학생";
+    var rb = $("uRec"); rb.textContent = "불러오는 중…";
+    idbSummary().then(function (sum) {
+      if (stuId !== uid) return;
+      rb.textContent = "";
+      var o = sum[uid], txt = document.createElement("span"); txt.style.flex = "1";
+      if (!o) { txt.textContent = "저장된 화면 기록이 없습니다. (관리자 앱이 켜져 있는 동안 학생이 공부하면 자동으로 남습니다)"; rb.append(txt); return; }
+      var d = function (t) { var x = new Date(t); return (x.getMonth() + 1) + "/" + x.getDate() + " " + clock(t).slice(0, 5); };
+      txt.textContent = o.n + "장 · " + d(o.a) + " ~ " + d(o.z);
+      var vb = document.createElement("button"); vb.type = "button"; vb.textContent = "화면 기록 보기";
+      vb.addEventListener("click", function () { openStored(uid, name); });
+      rb.append(txt, vb);
+    }, function (e) { rb.textContent = "화면 기록을 읽지 못했습니다: " + e; });
+    var db = $("uDays"); db.textContent = "불러오는 중…";
+    var from = new Date(); from.setDate(from.getDate() - 13);
+    window.sb.from("study_days").select("user_id,day,study_ms,away_ms,drowsy_ms,break_ms").eq("user_id", uid)
+      .gte("day", keyOf(from)).order("day", { ascending: false }).limit(14).then(function (r) {
+        if (stuId !== uid) return;
+        db.textContent = "";
+        if (r.error) { db.textContent = "기록을 불러오지 못했습니다: " + r.error.message; return; }
+        if (!r.data.length) { db.textContent = "최근 14일 동안 공부 기록이 없습니다."; return; }
+        r.data.forEach(function (x) {
+          var row = document.createElement("div"); row.className = "mrow";
+          var t = document.createElement("span"), dd = new Date(x.day + "T12:00:00");
+          t.textContent = (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ") · 공부 " + fmt(x.study_ms) + " · 자리비움 " + fmt(x.away_ms)
+            + " · 졸음 " + fmt(x.drowsy_ms) + " · 휴식 " + fmt(x.break_ms);
+          var b = document.createElement("button"); b.type = "button"; b.className = "ghost"; b.textContent = "리포트";
+          b.addEventListener("click", function () { loadEvents(x, x.day, name); });
+          row.append(t, b); db.append(row);
+        });
+      }, function (e) { db.textContent = "기록을 불러오지 못했습니다: " + e; });
+  }
   function stuTab(k) {
     document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.u === k)); });
     document.querySelectorAll("#stu .upane").forEach(function (el) { el.hidden = el.dataset.u !== k; });
     $("uMsg").textContent = "";
+    if (k === "log") loadStuLog();
   }
   document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.addEventListener("click", function () { stuTab(b.dataset.u); }); });
   function openStu(id) {
