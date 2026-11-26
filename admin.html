@@ -55,6 +55,8 @@
   .meta button { margin-top: 8px; padding: 6px 12px; font-size: 13px; background: transparent; color: var(--ink); }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 12px; z-index: 10; }
   #player, #report { z-index: 20; } /* 학생 관리 창 위에 열림 */
+  #uRecView .box { max-width: none; width: 100%; padding: 0; margin: 12px 0 0; box-shadow: none; background: none; }
+  #uRecView #pClose { display: none; }
   .modal[hidden] { display: none; }
   .box { background: var(--panel); border-radius: 12px; padding: 14px; width: min(640px, 100%); max-height: 100%; overflow: auto; }
   .phead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -329,6 +331,7 @@
       <h3 class="sth">저장된 화면 기록 — 이 기기에 남은 2초 간격 화면</h3>
       <p class="msg" id="uRecSum" style="margin:0 0 6px"></p>
       <div id="uRec"></div>
+      <div id="uRecView"></div>
       <div class="prow" id="uRecBtns" style="margin-top:10px"></div>
     </section>
 
@@ -575,7 +578,7 @@
           rq.onerror = function () { rec.err = String(rq.error && (rq.error.name + ": " + rq.error.message) || "저장 오류"); recStatus(); };
           rq.onsuccess = function () {
             row.id = rq.result; rec.n++; rec.last = at; rec.err = "";
-            if (cur && cur.uid === uid) { cur.frames.push(row); syncSeek(); } // 보고 있는 중이면 바로 이어 붙임
+            if (cur && cur.uid === uid && (!cur.day || cur.day === new Date(at).toDateString())) { cur.frames.push(row); syncSeek(); } // 보고 있는 중이면 바로 이어 붙임
           };
         }).catch(function (e) { rec.err = "저장소를 열지 못했습니다 (" + (e && (e.name || e.message) || e) + ")"; recStatus(); });
       }, "image/jpeg", 0.5);
@@ -694,11 +697,16 @@
     cur = { uid: uid, who: name || names[uid] || "학생", frames: [], events: [] };
     $("pName").textContent = cur.who + " — 화면 기록";
     $("pImg").removeAttribute("src"); $("pTime").textContent = "—"; $("pEvents").textContent = "불러오는 중…";
-    syncSeek(); seenInfo(); $("player").hidden = false;
+    syncSeek(); seenInfo(); if (!playerInline) $("player").hidden = false;
     var me = cur;
     idbAll(uid).then(function (rows) {
       if (cur !== me) return;
       me.frames = rows.concat(me.frames.filter(function (f) { return !rows.some(function (r) { return r.id === f.id; }); }));
+      if (startAt) { // 날짜를 골라 열었으면 그날 장면만
+        var dk = new Date(startAt).toDateString();
+        me.frames = me.frames.filter(function (f) { return new Date(f.t).toDateString() === dk; });
+        me.day = dk;
+      }
       syncSeek();
       if (startAt) { var si = 0; while (si < me.frames.length - 1 && me.frames[si].t < startAt) si++; showFrame(si); }
       else showFrame(me.frames.length - 1);
@@ -753,10 +761,10 @@
   setTimeout(loadRecList, 500);
   $("pClose").addEventListener("click", function () {
     stopPlay(); cur = null; $("player").hidden = true;
-    if (stuId && !$("stu").hidden) loadStuLog(); // 학생 관리 창에서 열었으면 장수 다시 표시
+    if (stuId && !$("stu").hidden && !playerInline) loadStuLog(); // 학생 관리 창에서 열었으면 장수 다시 표시
   });
   setInterval(function () {
-    if (!cur || $("player").hidden || !cur.frames.length) return;
+    if (!cur || (!playerInline && $("player").hidden) || !cur.frames.length) return;
     if (Date.now() - cur.frames[cur.frames.length - 1].t > 10000) syncSeek();
   }, 2000);
   function frameAt(t) { // 그 시각에 가장 가까운 장면 번호
@@ -1193,6 +1201,12 @@
       });
     }
   }
+  var playerInline = false, pBox = null;
+  function inlinePlayer(on) { // 재생기를 학생 관리 창 '기록' 탭 안에 바로 띄움
+    pBox = pBox || $("player").querySelector(".box");
+    if (on && !playerInline) { $("uRecView").append(pBox); playerInline = true; $("player").hidden = true; }
+    if (!on && playerInline) { stopPlay(); cur = null; $("player").append(pBox); playerInline = false; }
+  }
   function idbDays(uid) { // 그 학생의 저장된 화면을 날짜별로 묶음 (장수·처음·마지막)
     return idb().then(function (db) { return new Promise(function (res, rej) {
       var out = {}, rq = db.transaction("frames").objectStore("frames").index("uid").openCursor(IDBKeyRange.only(uid));
@@ -1213,7 +1227,11 @@
       box.textContent = "";
       var keys = Object.keys(days).sort().reverse(), total = 0;
       keys.forEach(function (k) { total += days[k].n; });
-      if (!keys.length) { box.textContent = "저장된 화면 기록이 없습니다. 관리자 앱이 켜져 있는 동안 학생이 공부하면 자동으로 남습니다."; return; }
+      if (!keys.length) {
+        inlinePlayer(false);
+        box.textContent = "이 기기에는 저장된 화면 기록이 없습니다. 화면 기록은 관리자 앱을 켜 둔 그 기기에만 저장됩니다 (예: 관리자 폰에서 켜 두었다면 그 폰에서만 보입니다).";
+        return;
+      }
       $("uRecSum").textContent = "모두 " + total.toLocaleString() + "장 · " + keys.length + "일치 (약 " + Math.max(1, Math.round(total * 12 / 1024)) + "MB)";
       keys.forEach(function (k) {
         var o = days[k], dd = new Date(k + "T12:00:00");
@@ -1221,7 +1239,7 @@
         var t = document.createElement("span");
         t.textContent = (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ") · " + o.n.toLocaleString() + "장 · " + clock(o.a).slice(0, 5) + " ~ " + clock(o.z).slice(0, 5);
         var b = document.createElement("button"); b.type = "button"; b.textContent = "보기";
-        b.addEventListener("click", function () { openStored(uid, name, null, o.a); }); // 그날 처음 장면부터
+        b.addEventListener("click", function () { inlinePlayer(true); openStored(uid, name, null, o.a); }); // 그날 처음 장면부터
         row.append(t, b); box.append(row);
       });
       var del = document.createElement("button"); del.type = "button"; del.className = "ghost"; del.textContent = "이 학생 화면 기록 모두 지우기";
@@ -1229,16 +1247,18 @@
         if (!window.confirm(name + " 님의 저장된 화면 기록 " + total.toLocaleString() + "장을 모두 지웁니다. 되돌릴 수 없습니다. 계속할까요?")) return;
         del.disabled = true;
         idbAll(uid).then(function (rows) { return idbDelete(rows.map(function (r) { return r.id; })); })
-          .then(function () { checkSpace(); loadRecList(); loadStuLog(); }, function (e) { del.disabled = false; $("uMsg").textContent = "지우기 실패: " + e; });
+          .then(function () { inlinePlayer(false); checkSpace(); loadRecList(); loadStuLog(); }, function (e) { del.disabled = false; $("uMsg").textContent = "지우기 실패: " + e; });
       });
       btns.append(del);
+      inlinePlayer(true); // 탭을 열면 가장 최근 기록을 바로 보여줌
+      if (!cur || cur.uid !== uid) openStored(uid, name, null, days[keys[0]].a);
     }, function (e) { box.textContent = "화면 기록을 읽지 못했습니다: " + e; });
   }
   function stuTab(k) {
     document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.u === k)); });
     document.querySelectorAll("#stu .upane").forEach(function (el) { el.hidden = el.dataset.u !== k; });
     $("uMsg").textContent = "";
-    if (k === "log") loadStuLog();
+    if (k === "log") loadStuLog(); else inlinePlayer(false);
   }
   document.querySelectorAll("#stu .utabs button").forEach(function (b) { b.addEventListener("click", function () { stuTab(b.dataset.u); }); });
   function openStu(id) {
@@ -1249,6 +1269,7 @@
   }
   function closeStu() {
     if ($("stu").hidden && $("statsPanel").parentNode !== $("uStats")) return;
+    inlinePlayer(false);
     $("stu").hidden = true; stuId = null;
     $("statsHome").append($("statsPanel")); // 통계 칸은 학생 관리 창에서만 보임
     $("stWho").value = "";
