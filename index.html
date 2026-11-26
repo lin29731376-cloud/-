@@ -68,10 +68,13 @@
   .clock span { font-size: 14px; color: var(--muted); grid-column: 1 / -1; }
   #tStudy { font-size: clamp(44px, 9vw, 64px); line-height: 1; font-weight: 700; letter-spacing: -0.03em;
     font-variant-numeric: tabular-nums; color: var(--ink); }
-  .goal { padding-bottom: 6px; min-width: 0; }
-  .goal .meter { height: 10px; margin: 0 0 6px; background: #e8edf5; }
-  #goalBar { background: var(--study); border-radius: 5px; }
-  #goalMsg { margin: 0; font-size: 13px; }
+  .goal { margin-top: 18px; padding: 14px 16px; border: 1.5px solid var(--line, #d9dcd3); border-radius: 14px; background: var(--panel, #fff); }
+  .goalHead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .goalHead b { font-size: 16px; color: var(--ink); }
+  #goalPct { font-size: 22px; font-weight: 700; color: var(--study); font-variant-numeric: tabular-nums; }
+  .goal .meter { height: 14px; margin: 0 0 8px; background: #e8edf5; border-radius: 7px; overflow: hidden; }
+  #goalBar { display: block; height: 100%; background: var(--study); border-radius: 7px; }
+  #goalMsg { margin: 0; font-size: 14px; }
 
   .row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
   button { font: inherit; font-weight: 600; padding: 11px 18px; border-radius: 12px; border: 1.5px solid var(--ink);
@@ -146,10 +149,6 @@
       <div class="clock">
         <span>오늘 공부한 시간</span>
         <b id="tStudy">00:00</b>
-        <div class="goal">
-          <div class="meter"><i id="goalBar"></i></div>
-          <p class="msg" id="goalMsg"></p>
-        </div>
       </div>
 
       <div class="row">
@@ -163,6 +162,12 @@
         <button id="brkEnd" hidden>다시 공부하기</button>
       </div>
       <p class="msg" id="lMsg" style="margin:10px 0 0"></p>
+
+      <div class="goal" aria-label="오늘 목표">
+        <div class="goalHead"><b>오늘 목표 <span id="goalH">4시간</span></b><span id="goalPct">0%</span></div>
+        <div class="meter"><i id="goalBar"></i></div>
+        <p class="msg" id="goalMsg"></p>
+      </div>
     </section>
 
     <div class="side">
@@ -229,6 +234,7 @@ const $ = (id) => document.getElementById(id);
 
 const video = $("video"), stage = $("stage"), badge = $("badge"), msg = $("msg"), faceTag = $("faceTag");
 let landmarker = null, stream = null, timer = null, audio = null;
+let goalHours = 4; // 오늘 목표(시간) — 관리자가 정함 (학생별 설정 → 없으면 전체 기본값)
 let state = "idle", lastTick = 0, lastFace = 0, closedSince = 0, lastOpen = 0;
 let why = ""; // 감지 이유 (예: 앱 나감)
 // 분할 화면·팝업 창·다른 앱 조작 감지: 휴대폰에서 이 앱 창이 평소 전체 화면 크기보다 작아지거나,
@@ -533,12 +539,14 @@ async function initAccount() {
 if (window.smAuth) initAccount(); else document.addEventListener("sm-ready", initAccount, { once: true });
 
 // --- 오늘 목표 ---
-let goalHours = 4; // 관리자가 정함 (학생별 설정 → 없으면 전체 기본값)
 function setGoal(h) { if (Number(h) > 0) { goalHours = Number(h); renderGoal(); } }
 function renderGoal() {
-  const pct = Math.min(100, Math.round(total.study / (goalHours * 3600000) * 100));
+  const goalMs = goalHours * 3600000, pct = Math.min(100, Math.round(total.study / goalMs * 100));
+  $("goalH").textContent = goalHours + "시간";
+  $("goalPct").textContent = pct + "%";
   $("goalBar").style.width = pct + "%";
-  $("goalMsg").textContent = `${fmt(total.study)} / ${goalHours}시간 (${pct}%)` + (pct >= 100 ? " — 목표 달성!" : "");
+  $("goalMsg").textContent = pct >= 100 ? `${fmt(total.study)} 채움 — 목표 달성!`
+    : `${fmt(total.study)} 채움 · 남은 시간 ${fmt(goalMs - total.study)}`;
 }
 renderGoal();
 
