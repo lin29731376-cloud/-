@@ -671,7 +671,7 @@
   }
   function openPlayer(t) { // 모니터링 칸의 「기록 보기」
     var key = null; tiles.forEach(function (o, k) { if (o === t) key = k; });
-    openStored(String(key || "").replace(/^lk:stu-/, ""), t.who, t.events);
+    openServerDay(String(key || "").replace(/^lk:stu-/, ""), t.who, keyOf(new Date())); // 오늘 기록을 서버에서 받아 엶
   }
   function openStored(uid, name, liveEvents, startAt) { // 이 기기에 저장된 그 학생의 화면 기록 열기
     stopPlay();
@@ -778,19 +778,29 @@
       have.forEach(function (f) { seen[f.t] = 1; });
       openStored(uid, name, null, dayStart);
       $("pInfo").textContent = "서버에서 받아오는 중…";
-      stList(uid + "/" + day).then(function (files) {
-        var f = files.filter(function (x) { return /\.bin$/.test(x.name); }), done = 0, total = f.length, running = 0;
-        var next = function () {
-          if (!f.length) { if (!running) syncSeek(); return; }
-          var x = f.shift(); running++;
-          var fin = function () { running--; done++; if (cur && cur.uid === uid && done < total) $("pInfo").textContent = "서버에서 받아오는 중… " + done + "/" + total; next(); };
-          window.sb.storage.from("rec").download(uid + "/" + day + "/" + x.name).then(function (r) {
-            if (r.error || !r.data) { fin(); return; }
-            r.data.arrayBuffer().then(function (buf) { unpackChunk(buf, function (pkt) { recvFrame(uid, name, pkt); }); fin(); }, fin);
-          }, fin);
-        };
-        for (var k = 0; k < 6; k++) next(); // 6개씩 동시에 받아 빨리 엶
-      }, function (e) { $("pInfo").textContent = "서버 기록을 받지 못했습니다: " + (e && e.message || e); });
+      var got = {}, me = cur, first = true;
+      var fetchNew = function () { // 아직 안 받은 묶음만 받아옴
+        if (cur !== me) return;
+        stList(uid + "/" + day).then(function (files) {
+          var f = files.filter(function (x) { return /\.bin$/.test(x.name) && !got[x.name]; }), done = 0, total = f.length, running = 0;
+          f.forEach(function (x) { got[x.name] = 1; });
+          if (!total) { if (first) syncSeek(); first = false; return; }
+          var next = function () {
+            if (!f.length) { if (!running) { syncSeek(); first = false; } return; }
+            var x = f.shift(); running++;
+            var fin = function () { running--; done++; if (first && cur === me && done < total) $("pInfo").textContent = "서버에서 받아오는 중… " + done + "/" + total; next(); };
+            window.sb.storage.from("rec").download(uid + "/" + day + "/" + x.name).then(function (r) {
+              if (r.error || !r.data) { delete got[x.name]; fin(); return; }
+              r.data.arrayBuffer().then(function (buf) { unpackChunk(buf, function (pkt) { recvFrame(uid, name, pkt); }); fin(); }, fin);
+            }, function () { delete got[x.name]; fin(); });
+          };
+          for (var k = 0; k < 6; k++) next(); // 6개씩 동시에
+        }, function (e) { if (first) $("pInfo").textContent = "서버 기록을 받지 못했습니다: " + (e && e.message || e); });
+      };
+      fetchNew();
+      if (day === keyOf(new Date())) { // 오늘 기록이면 열어 둔 동안 20초마다 새로 올라온 것을 받아 붙임
+        var iv = setInterval(function () { if (cur !== me || (!playerInline && $("player").hidden)) { clearInterval(iv); return; } fetchNew(); }, 20000);
+      }
     });
   }
   function deleteServerDay(uid, day) {

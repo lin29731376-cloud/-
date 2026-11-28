@@ -496,14 +496,16 @@ async function uploadRec(force) {
         new DataView(len.buffer).setUint32(0, p.length); parts.push(len, p);
       }
       const path = myUid() + "/" + day + "/" + rows[0].t + ".bin";
-      const { error } = await window.sb.storage.from("rec").upload(path, new Blob(parts, { type: "application/octet-stream" }), { upsert: false });
+      const up = window.sb.storage.from("rec").upload(path, new Blob(parts, { type: "application/octet-stream" }), { upsert: false });
+      const { error } = await Promise.race([up, new Promise((res) => setTimeout(() => res({ error: { message: "시간 초과(인터넷 확인)" } }), 25000))]); // 멈춰 버리지 않게
       const dup = error && /exist|duplicate|409/i.test(String(error.message || error.statusCode || error)); // 이미 올라간 묶음
       if (error && !dup) { // 서버 준비 전이면 5분 뒤 다시
-        upPauseUntil = Date.now() + 5 * 60000; console.warn("화면 기록 올리기 실패", error);
-        $("upMsg").textContent = "화면 기록 올리기 실패: " + (error.message || error) + " (5분 뒤 다시 시도)"; break;
+        upPauseUntil = Date.now() + 30000; console.warn("화면 기록 올리기 실패", error);
+        $("upMsg").textContent = "화면 기록 올리기 실패: " + (error.message || error) + " (30초 뒤 다시 시도, 그동안 이 폰에 보관)"; break;
       }
       upCount += rows.length;
-      $("upMsg").textContent = "화면 기록 서버에 올림: 오늘 " + upCount.toLocaleString() + "장 · 마지막 " + clockNow();
+      { const z = (x) => String(x).padStart(2, "0"), d = new Date(rows[rows.length - 1].t);
+        $("upMsg").textContent = "화면 기록 서버에 올림: 이번에 " + upCount.toLocaleString() + "장 · " + z(d.getHours()) + ":" + z(d.getMinutes()) + ":" + z(d.getSeconds()) + " 장면까지"; }
       try { localStorage.setItem(upKey(), String(rows[rows.length - 1].t)); } catch (e) {}
     }
   } catch (e) { console.warn(e); }
