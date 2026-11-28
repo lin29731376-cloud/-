@@ -162,6 +162,7 @@
         <button id="brkEnd" hidden>다시 공부하기</button>
       </div>
       <p class="msg" id="lMsg" style="margin:10px 0 0"></p>
+      <p class="msg" id="upMsg" style="margin:4px 0 0"></p>
 
     </section>
 
@@ -476,7 +477,7 @@ async function syncTo(adminId, since) { // 관리자가 아직 못 받은 장면
   recSubs.add(adminId);
 }
 // --- 서버로 올리기: 30초마다 쌓인 장면을 묶어서 올림 (관리자는 언제든 서버에서 봄) ---
-let upBusy = false, upPauseUntil = 0;
+let upBusy = false, upPauseUntil = 0, upCount = 0;
 const upKey = () => "sm_rec_up_" + myUid();
 const upLast = () => { try { return Number(localStorage.getItem(upKey())) || 0; } catch (e) { return 0; } };
 const dayOf = (t) => { const d = new Date(t), z = (x) => String(x).padStart(2, "0"); return d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()); };
@@ -497,7 +498,12 @@ async function uploadRec(force) {
       const path = myUid() + "/" + day + "/" + rows[0].t + ".bin";
       const { error } = await window.sb.storage.from("rec").upload(path, new Blob(parts, { type: "application/octet-stream" }), { upsert: false });
       const dup = error && /exist|duplicate|409/i.test(String(error.message || error.statusCode || error)); // 이미 올라간 묶음
-      if (error && !dup) { upPauseUntil = Date.now() + 5 * 60000; console.warn("화면 기록 올리기 실패", error); break; } // 서버 준비 전이면 5분 뒤 다시
+      if (error && !dup) { // 서버 준비 전이면 5분 뒤 다시
+        upPauseUntil = Date.now() + 5 * 60000; console.warn("화면 기록 올리기 실패", error);
+        $("upMsg").textContent = "화면 기록 올리기 실패: " + (error.message || error) + " (5분 뒤 다시 시도)"; break;
+      }
+      upCount += rows.length;
+      $("upMsg").textContent = "화면 기록 서버에 올림: 오늘 " + upCount.toLocaleString() + "장 · 마지막 " + clockNow();
       try { localStorage.setItem(upKey(), String(rows[rows.length - 1].t)); } catch (e) {}
     }
   } catch (e) { console.warn(e); }
