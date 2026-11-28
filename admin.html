@@ -69,7 +69,7 @@
   #pSeenLegend .k { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-left: 6px; }
   #pSeenLegend .k:first-child { margin-left: 0; }
   #pSeenLegend .st { background: #2b63d9; } #pSeenLegend .aw { background: #e9a514; } #pSeenLegend .dr { background: #d64541; } #pSeenLegend .br { background: #4f8a74; } #pSeenLegend .off { background: #d9dcd3; }
-  #pSeenPct { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+  #pSeenPct { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); white-space: pre-line; }
   .prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .prow .msg { flex-basis: auto; }
   .ptitle { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
@@ -615,7 +615,7 @@
       var nt = i < n - 1 ? fr[i + 1].t : Math.max(end, fr[i].t + 2000), gap = nt - fr[i].t > 10000; // 10초 넘게 비면 공부를 끝냈던 시간
       var x0 = X(fr[i].t), x1 = gap ? X(fr[i].t + 2000) : X(nt);
       g.fillStyle = ST_COLOR[st] || "#d9dcd3"; g.fillRect(Math.floor(x0), 0, Math.max(1, Math.ceil(x1 - x0) + 0.5), 12);
-      if (gap) { gaps++; gapMs += nt - fr[i].t; }
+      if (gap && i < n - 1) { gaps++; gapMs += nt - fr[i].t; } // 끝냈다가 다시 시작하기까지 (끝낸 뒤 지금까지는 따로)
       if (i > 0) { var dt = Math.min(fr[i].t - fr[i - 1].t, 10000); if (sum[key] !== undefined) sum[key] += dt; } // 기록이 끊긴 구간은 10초까지만 셈
       if (key !== prev && cnt[key] !== undefined) cnt[key]++;
       prev = key;
@@ -623,7 +623,14 @@
     var m = function (ms) { var s2 = Math.round(ms / 1000); return s2 >= 60 ? Math.floor(s2 / 60) + "분 " + (s2 % 60) + "초" : s2 + "초"; };
     $("pSeenPct").textContent = "이 기록 동안 자리비움 " + cnt.away + "번 · " + m(sum.away) + " / 졸음 " + cnt.drowsy + "번 · " + m(sum.drowsy)
       + " / 휴식 " + m(sum.break) + " / 공부 " + m(sum.study)
-      + (gaps ? " / 공부 안 함 " + gaps + "번 · " + m(gapMs) + (end > fr[n - 1].t ? " (지금도 공부 안 하는 중)" : "") : "");
+      + (gaps ? " / 중간에 끝냈던 시간 " + gaps + "번 · " + m(gapMs) : "")
+      + (end > fr[n - 1].t + 10000 ? " / 마지막으로 끝낸 뒤 " + m(end - fr[n - 1].t) + " 지남" : "");
+    // 실제로 앱을 켜고 있던 구간들
+    var segs = [], s0 = fr[0].t;
+    for (var j = 1; j <= n; j++) {
+      if (j === n || fr[j].t - fr[j - 1].t > 10000) { segs.push(clock(s0).slice(0, 5) + "~" + clock(fr[j - 1].t).slice(0, 5)); if (j < n) s0 = fr[j].t; }
+    }
+    $("pSeenPct").textContent += "\n앱을 켜고 있던 구간: " + segs.slice(-6).join(", ") + (segs.length > 6 ? " 외 " + (segs.length - 6) + "개" : "");
   }
   window.addEventListener("resize", function () { if (cur) drawSeen(); });
   function seenInfo() {
