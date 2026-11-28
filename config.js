@@ -51,3 +51,26 @@ window.smUpdate = async function (btn) {
   } catch (e) { /* 실패해도 새로고침은 함 */ }
   location.reload();
 };
+
+// 새 버전 알림: 사이트에 새 버전이 올라오면 화면 위에 「업데이트」 안내를 띄움
+window.SM_VERSION = 63; // version.json 과 같아야 함 (새로 올릴 때 둘 다 올림)
+window.smShowUpdateBar = function (text) {
+  if (document.getElementById("smUpd")) return;
+  var bar = document.createElement("div"); bar.id = "smUpd";
+  bar.style.cssText = "position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:9999;display:flex;gap:10px;align-items:center;" +
+    "padding:12px 14px;border-radius:14px;background:#1e2a44;color:#fff;font:600 15px/1.4 sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25)";
+  var t = document.createElement("span"); t.style.flex = "1"; t.textContent = text || "앱 새 버전이 나왔습니다. 업데이트해 주세요.";
+  var b = document.createElement("button"); b.type = "button"; b.textContent = "업데이트";
+  b.style.cssText = "font:700 15px sans-serif;padding:9px 14px;border-radius:10px;border:0;background:#fff;color:#1e2a44";
+  b.addEventListener("click", function () { window.smUpdate(b); });
+  bar.append(t, b); document.body.append(bar);
+};
+(function () {
+  function check() {
+    fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && Number(j.v) > window.SM_VERSION) window.smShowUpdateBar();
+    }).catch(function () {});
+  }
+  setTimeout(check, 5000); setInterval(check, 120000); // 2분마다 확인
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") check(); });
+})();

@@ -544,7 +544,7 @@ async function connectLink(gen) {
   const me = { room, pub: null };
   room.on(RoomEvent.DataReceived, (payload, from) => { // 관리자가 보낸 명령만 받음
     if (!from || !from.identity.startsWith("admin-")) return;
-    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); else if (d && d.cmd === "cfg") applyCfg(d); else if (d && d.cmd === "goal") setGoal(d.hours); else if (d && d.cmd === "pull") syncTo(from.identity, d.since); } catch (e) {}
+    try { const d = JSON.parse(new TextDecoder().decode(payload)); if (d && d.cmd === "wake") wakeUp(); else if (d && d.cmd === "cfg") applyCfg(d); else if (d && d.cmd === "goal") setGoal(d.hours); else if (d && d.cmd === "pull") syncTo(from.identity, d.since); else if (d && d.cmd === "update") window.smShowUpdateBar("선생님이 앱 업데이트를 요청했습니다. 눌러서 업데이트해 주세요."); } catch (e) {}
   });
   room.on(RoomEvent.ParticipantConnected, () => sendStatus());
   room.on(RoomEvent.ParticipantDisconnected, (p) => { if (p) recSubs.delete(p.identity); });

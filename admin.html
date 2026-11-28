@@ -249,6 +249,8 @@
     <b style="flex-basis:100%">앱 업데이트</b>
     <span class="sub" style="flex:1">새 기능이 안 보이면 눌러 최신 버전으로 다시 엽니다. 저장된 화면 기록은 지워지지 않습니다.</span>
     <button type="button" onclick="smUpdate(this)">앱 업데이트</button>
+    <button type="button" class="ghost" id="pushUpd">학생들에게 업데이트 알림 보내기</button>
+    <span class="msg" id="pushUpdMsg" style="flex-basis:100%;margin:0"></span>
   </div>
 
   <div id="statsHome" hidden>
@@ -1848,6 +1850,11 @@
     loadMembers();
   }
   $("mReload").addEventListener("click", loadMembers);
+  $("pushUpd").addEventListener("click", function () { // 지금 공부 중인 학생 화면에 업데이트 안내를 띄움
+    var n = 0; tiles.forEach(function (t) { try { if (t.send && t.state !== "off" && t.send({ cmd: "update" })) n++; } catch (e) {} });
+    $("pushUpdMsg").textContent = n ? "지금 접속 중인 학생 " + n + "명에게 보냈습니다. 접속하지 않은 학생은 앱을 열면 새 버전 안내가 자동으로 뜹니다."
+      : "지금 접속 중인 학생이 없습니다. 학생이 앱을 열면 새 버전 안내가 자동으로 뜹니다.";
+  });
   $("logout").addEventListener("click", function () { if (window.smAuth) window.smAuth.logout(); });
   if (window.smAuth) onReady(); else document.addEventListener("sm-ready", onReady, { once: true });
 
