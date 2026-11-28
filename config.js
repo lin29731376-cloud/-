@@ -67,6 +67,7 @@ window.smShowUpdateBar = function (text) {
 };
 (function () {
   function check() {
+    if (window.SM_REQUIRE !== "admin") return; // 학생 앱에는 자동으로 띄우지 않음 — 관리자가 보낼 때만
     fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
       if (j && Number(j.v) > window.SM_VERSION) window.smShowUpdateBar();
     }).catch(function () {});
