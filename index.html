@@ -489,7 +489,7 @@ async function uploadRec(force) {
       let rows = await rafter(upLast(), 60);
       if (!rows.length) break;
       const day = dayOf(rows[0].t); rows = rows.filter((r) => dayOf(r.t) === day); // 하루 단위로 나눔
-      if (!force && rows.length < 30 && Date.now() - rows[0].t < 60000) break; // 조금 더 모았다가 올림
+      if (!force && rows.length < 5 && Date.now() - rows[0].t < 10000) break; // 10초치(5장)씩 바로바로 올림
       const parts = [];
       for (const r of rows) {
         const p = await packShot(r), len = new Uint8Array(4);
@@ -509,7 +509,7 @@ async function uploadRec(force) {
   } catch (e) { console.warn(e); }
   upBusy = false;
 }
-setInterval(() => uploadRec(false), 30000);
+setInterval(() => uploadRec(false), 10000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") uploadRec(true); });
 function sendStatus() {
   sendMsg({ name: $("who").value.trim() || "이름 미입력", state, total, reason: onBreak ? breakReason : (state === "away" || state === "drowsy") ? why : "" });

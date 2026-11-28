@@ -714,9 +714,13 @@
   // --- 기록 탭: 저장된 화면 기록 목록 ---
   function mb(n) { return n >= 1e9 ? (n / 1e9).toFixed(1) + "GB" : Math.round(n / 1e6) + "MB"; }
   // --- 기록 탭: 서버에 올라온 화면 기록 (학생 폰이 30초마다 올림) — 어느 기기에서든 바로 봄 ---
-  function stList(prefix) {
-    return window.sb.storage.from("rec").list(prefix, { limit: 1000, sortBy: { column: "name", order: "asc" } })
-      .then(function (r) { if (r.error) throw r.error; return r.data || []; });
+  function stList(prefix) { // 1000개씩 끊어서 전부 읽음
+    var all = [];
+    var page = function (off) {
+      return window.sb.storage.from("rec").list(prefix, { limit: 1000, offset: off, sortBy: { column: "name", order: "asc" } })
+        .then(function (r) { if (r.error) throw r.error; var d = r.data || []; all = all.concat(d); return d.length === 1000 ? page(off + 1000) : all; });
+    };
+    return page(0);
   }
   function dayLabel(k) { var dd = new Date(k + "T12:00:00"); return (dd.getMonth() + 1) + "/" + dd.getDate() + "(" + WD[dd.getDay()] + ")"; }
   function loadRecList() {
@@ -768,20 +772,17 @@
       openStored(uid, name, null, dayStart);
       $("pInfo").textContent = "서버에서 받아오는 중…";
       stList(uid + "/" + day).then(function (files) {
-        var f = files.filter(function (x) { return /\.bin$/.test(x.name); }), done = 0;
+        var f = files.filter(function (x) { return /\.bin$/.test(x.name); }), done = 0, total = f.length, running = 0;
         var next = function () {
-          if (!f.length) { syncSeek(); return; }
-          var x = f.shift();
+          if (!f.length) { if (!running) syncSeek(); return; }
+          var x = f.shift(); running++;
+          var fin = function () { running--; done++; if (cur && cur.uid === uid && done < total) $("pInfo").textContent = "서버에서 받아오는 중… " + done + "/" + total; next(); };
           window.sb.storage.from("rec").download(uid + "/" + day + "/" + x.name).then(function (r) {
-            if (r.error || !r.data) { next(); return; }
-            r.data.arrayBuffer().then(function (buf) {
-              unpackChunk(buf, function (pkt) { recvFrame(uid, name, pkt); });
-              done++; if (cur && cur.uid === uid) $("pInfo").textContent = "서버에서 받아오는 중… " + done + "/" + (done + f.length);
-              next();
-            });
-          }, function () { next(); });
+            if (r.error || !r.data) { fin(); return; }
+            r.data.arrayBuffer().then(function (buf) { unpackChunk(buf, function (pkt) { recvFrame(uid, name, pkt); }); fin(); }, fin);
+          }, fin);
         };
-        next();
+        for (var k = 0; k < 6; k++) next(); // 6개씩 동시에 받아 빨리 엶
       }, function (e) { $("pInfo").textContent = "서버 기록을 받지 못했습니다: " + (e && e.message || e); });
     });
   }
