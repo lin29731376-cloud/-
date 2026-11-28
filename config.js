@@ -53,7 +53,7 @@ window.smUpdate = async function (btn) {
 };
 
 // 새 버전 알림: 사이트에 새 버전이 올라오면 화면 위에 「업데이트」 안내를 띄움
-window.SM_VERSION = 63; // version.json 과 같아야 함 (새로 올릴 때 둘 다 올림)
+window.SM_VERSION = 65; // version.json 과 같아야 함 (새로 올릴 때 둘 다 올림)
 window.smShowUpdateBar = function (text) {
   if (document.getElementById("smUpd")) return;
   var bar = document.createElement("div"); bar.id = "smUpd";

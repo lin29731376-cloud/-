@@ -835,7 +835,7 @@
   }
   function gotSave(uid, day) { try { localStorage.setItem(gotKey(uid, day), JSON.stringify(Object.keys(gotSet(uid, day)))); } catch (e) {} }
   function bgSync() {
-    if (bgBusy || recFull || !window.sb || document.visibilityState !== "visible") return;
+    if (bgBusy || recFull || !window.sb) return; // 앱이 뒤로 가 있어도 폰이 허락하는 동안은 계속 받음
     bgBusy = true;
     var day = keyOf(new Date());
     var done = function () { bgBusy = false; };
@@ -852,14 +852,15 @@
           return ready.then(function () { return listP.then(function (x) { if (full) bgFull[uid] = Date.now(); return x; }).catch(function () { return []; }); }).then(function (files) {
             var got = gotSet(uid, day), f = files.filter(function (x) { return /\.bin$/.test(x.name) && !got[x.name]; });
             var m = memberOf(uid), name = m ? m.name : "";
-            return f.reduce(function (p, x) {
-              return p.then(function () {
-                return window.sb.storage.from("rec").download(uid + "/" + day + "/" + x.name).then(function (r) {
-                  if (r.error || !r.data) return;
-                  return r.data.arrayBuffer().then(function (buf) { unpackChunk(buf, function (pkt) { recvFrame(uid, name, pkt); }); got[x.name] = 1; });
-                }).catch(function () {});
-              });
-            }, Promise.resolve()).then(function () { gotSave(uid, day); });
+            var one = function (x) {
+              return window.sb.storage.from("rec").download(uid + "/" + day + "/" + x.name).then(function (r) {
+                if (r.error || !r.data) return;
+                return r.data.arrayBuffer().then(function (buf) { unpackChunk(buf, function (pkt) { recvFrame(uid, name, pkt); }); got[x.name] = 1; });
+              }).catch(function () {});
+            };
+            var worker = function () { var x = f.shift(); return x ? one(x).then(worker) : Promise.resolve(); };
+            var ws = []; for (var k = 0; k < 6; k++) ws.push(worker()); // 6개씩 동시에 받아 밀린 것도 빨리 채움
+            return Promise.all(ws).then(function () { gotSave(uid, day); });
           });
         });
       });
