@@ -799,7 +799,7 @@
       };
       fetchNew();
       if (day === keyOf(new Date())) { // 오늘 기록이면 열어 둔 동안 20초마다 새로 올라온 것을 받아 붙임
-        var iv = setInterval(function () { if (cur !== me || (!playerInline && $("player").hidden)) { clearInterval(iv); return; } fetchNew(); }, 20000);
+        var iv = setInterval(function () { if (cur !== me || (!playerInline && $("player").hidden)) { clearInterval(iv); return; } fetchNew(); }, 60000); // 대부분은 5초마다 자동 저장이 바로 붙여 줌
       }
     });
   }
@@ -815,8 +815,16 @@
       });
     });
   }
-  // --- 자동 저장: 관리자 앱이 켜져 있는 동안 서버에 새로 올라온 오늘 화면을 30초마다 이 기기에 받아 둠 ---
-  var bgGot = {}, bgSeenReady = {}, bgBusy = false;
+  // --- 자동 저장: 관리자 앱이 켜져 있는 동안 서버에 새로 올라온 오늘 화면을 5초마다 이 기기에 받아 둠 ---
+  var bgGot = {}, bgSeenReady = {}, bgBusy = false, bgFull = {};
+  function stListFrom(prefix, off) { // off번째부터 새 파일만 (이름이 시각 순이라 새 것은 뒤에 붙음)
+    var all = [];
+    var page = function (o) {
+      return window.sb.storage.from("rec").list(prefix, { limit: 1000, offset: o, sortBy: { column: "name", order: "asc" } })
+        .then(function (r) { if (r.error) throw r.error; var d = r.data || []; all = all.concat(d); return d.length === 1000 ? page(o + 1000) : all; });
+    };
+    return page(off);
+  }
   function gotKey(uid, day) { return "sm_got_" + uid + "_" + day; }
   function gotSet(uid, day) {
     var k = gotKey(uid, day);
@@ -837,7 +845,9 @@
           var ready = bgSeenReady[uid] ? Promise.resolve() : idbAll(uid).then(function (have) { // 이미 가진 장면은 다시 저장하지 않음
             var seen = recSeen[uid] = recSeen[uid] || {}; have.forEach(function (f) { seen[f.t] = 1; }); bgSeenReady[uid] = 1;
           });
-          return ready.then(function () { return stList(uid + "/" + day).catch(function () { return []; }); }).then(function (files) {
+          var full = !bgFull[uid] || Date.now() - bgFull[uid] > 300000;
+          var listP = full ? stList(uid + "/" + day) : stListFrom(uid + "/" + day, Math.max(0, Object.keys(gotSet(uid, day)).length - 3));
+          return ready.then(function () { return listP.then(function (x) { if (full) bgFull[uid] = Date.now(); return x; }).catch(function () { return []; }); }).then(function (files) {
             var got = gotSet(uid, day), f = files.filter(function (x) { return /\.bin$/.test(x.name) && !got[x.name]; });
             var m = memberOf(uid), name = m ? m.name : "";
             return f.reduce(function (p, x) {
@@ -854,7 +864,7 @@
       return chain;
     }).then(done, done);
   }
-  setInterval(bgSync, 30000); setTimeout(bgSync, 4000);
+  setInterval(bgSync, 5000); setTimeout(bgSync, 3000); // 5초마다 새로 올라온 것을 받음
   function pruneServer() { // 보관 기간이 지난 날짜는 서버에서 지움
     var keep = Number(window.smAuth && window.smAuth.settings.rec_keep_days) || 3;
     var limit = new Date(); limit.setDate(limit.getDate() - keep + 1); var lk = keyOf(limit);
